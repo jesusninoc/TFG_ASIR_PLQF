@@ -1,0 +1,195 @@
+@import "tailwindcss";
+
+:root {
+  /* Core palette — polar / openai inspired: white base */
+  --bg-base: #FFFFFF;
+  --bg-card: #FFFFFF;
+  --bg-subtle: #F7F7F8;
+  --bg-sidebar: #F4F4F5;
+
+  --border: rgba(0, 0, 0, 0.08);
+  --border-strong: rgba(0, 0, 0, 0.14);
+
+  --text-primary: #111110;
+  --text-secondary: #6B7280;
+  --text-tertiary: #9CA3AF;
+
+  --accent: #0066FF;
+  --accent-hover: #0052CC;
+  --accent-subtle: #EFF4FF;
+  --accent-subtle-hover: #DDEAFF;
+
+  --destructive: #DC2626;
+  --destructive-subtle: #FEF2F2;
+
+  --success: #16A34A;
+  --success-subtle: #F0FDF4;
+
+  /* Legacy stripe compat */
+  --stripe-primary: #0066FF;
+  --stripe-text: #111110;
+  --stripe-border: rgba(0, 0, 0, 0.08);
+  --stripe-danger: #DC2626;
+
+  --background: var(--bg-base);
+  --foreground: var(--text-primary);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: var(--font-geist-sans), sans-serif;
+  min-height: 100vh;
+}
+
+/* ─── Grid mesh pattern ───────────────────────────────────────
+   Apply .grid-mesh to the wrapper and .grid-mesh-item to each cell.
+   The top+left borders on the wrapper + right+bottom on each cell
+   create seamless shared grid lines with no gap. */
+.grid-mesh {
+  border-top: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+}
+
+.grid-mesh-item {
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+* {
+  border-color: var(--border);
+}
+
+a {
+  transition: color 0.15s ease, opacity 0.15s ease;
+}
+
+/* ─── Base component tokens ──────────────────────────────────── */
+@layer components {
+  /* Cards / panels */
+  .card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+  }
+
+  .card-subtle {
+    background: var(--bg-subtle);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+  }
+
+  /* Inputs */
+  .input-base {
+    background: var(--bg-card);
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    font-size: 0.875rem;
+    color: var(--text-primary);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+
+  .input-base:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(0, 102, 255, 0.1);
+  }
+
+  /* Buttons */
+  .btn-primary {
+    background: var(--text-primary);
+    color: #fff;
+    border-radius: 8px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition: background 0.15s ease;
+    border: none;
+  }
+
+  .btn-primary:hover {
+    background: #2A2A27;
+  }
+
+  .btn-secondary {
+    background: var(--bg-card);
+    color: var(--text-primary);
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition: background 0.15s ease, border-color 0.15s ease;
+  }
+
+  .btn-secondary:hover {
+    background: var(--bg-subtle);
+    border-color: rgba(0,0,0,0.2);
+  }
+
+  .btn-accent {
+    background: var(--accent-subtle);
+    color: var(--accent);
+    border-radius: 8px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition: background 0.15s ease;
+    border: none;
+  }
+
+  .btn-accent:hover {
+    background: var(--accent-subtle-hover);
+  }
+
+  /* Legacy stripe compat */
+  .btn-stripe {
+    background: var(--text-primary);
+    color: #fff;
+    border-radius: 8px;
+    font-weight: 500;
+    transition: background 0.15s ease;
+    border: none;
+  }
+
+  .btn-stripe:hover {
+    background: #2A2A27;
+  }
+
+  .btn-stripe-muted {
+    background: var(--accent-subtle);
+    color: var(--accent);
+    border-radius: 8px;
+    font-weight: 500;
+    transition: background 0.15s ease;
+    border: none;
+  }
+
+  .btn-stripe-muted:hover {
+    background: var(--accent-subtle-hover);
+  }
+
+  /* Status pills */
+  .status-ok {
+    background: var(--success-subtle);
+    color: var(--success);
+    border: 1px solid rgba(22, 163, 74, 0.2);
+    border-radius: 8px;
+  }
+
+  .status-error {
+    background: var(--destructive-subtle);
+    color: var(--destructive);
+    border: 1px solid rgba(220, 38, 38, 0.2);
+    border-radius: 8px;
+  }
+}
