@@ -103,8 +103,18 @@ a {
 
   .input-base:focus {
     outline: none;
-    border-color: var(--accent);
-    box-shadow: 0 0 0 3px rgba(0, 102, 255, 0.1);
+    border-color: var(--text-primary);
+    box-shadow: 0 0 0 3px rgba(17, 17, 16, 0.08);
+  }
+
+  .input-base::placeholder {
+    color: var(--text-tertiary);
+  }
+
+  /* Checkout field group */
+  .checkout-field-group {
+    display: grid;
+    gap: 1rem;
   }
 
   /* Buttons */

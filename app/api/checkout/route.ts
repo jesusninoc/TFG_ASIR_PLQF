@@ -1,52 +1,107 @@
-import Stripe from "stripe";
+/**
+ * app/api/checkout/route.ts
+ * Crea una Stripe Checkout Session y registra el pedido como PENDING en la BD.
+ */
+
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { stripe } from "@/lib/stripe";
+import { prisma } from "@/lib/prisma";
 
 const bodySchema = z.object({
-  items: z.array(
-    z.object({
-      quantity: z.number().int().positive(),
-      product: z.object({
-        id: z.string(),
-        name: z.string(),
-        priceCents: z.number().int().positive(),
+  items: z
+    .array(
+      z.object({
+        quantity: z.number().int().positive().max(99),
+        product: z.object({
+          id: z.string().max(128),
+        }),
       }),
-    }),
-  ),
+    )
+    .nonempty()
+    .max(50),
 });
 
 export async function POST(request: Request) {
-  const payload = await request.json();
-  const parsed = bodySchema.safeParse(payload);
-  if (!parsed.success) {
-    return NextResponse.json({ error: "Payload inválido" }, { status: 400 });
-  }
+  try {
+    const payload = await request.json();
+    const parsed = bodySchema.safeParse(payload);
+    if (!parsed.success) {
+      return NextResponse.json({ error: "Payload inválido" }, { status: 400 });
+    }
 
-  const origin = request.headers.get("origin") ?? "http://localhost:3000";
+    // Use the configured app URL only — never trust the client-supplied origin header
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
-  if (!process.env.STRIPE_SECRET_KEY) {
-    return NextResponse.json({
-      url: `${origin}/checkout/simulated?status=ok&session=demo`,
-      mode: "simulated",
+    // Resolve prices from the DB — NEVER trust client-supplied prices
+    const productIds = parsed.data.items.map((i) => i.product.id);
+    const dbProducts = await prisma.product.findMany({
+      where: { id: { in: productIds }, stock: { gt: 0 } },
+      select: { id: true, name: true, priceCents: true, stock: true },
     });
-  }
 
-  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
-  const session = await stripe.checkout.sessions.create({
-    mode: "payment",
-    success_url: `${origin}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
-    cancel_url: `${origin}/checkout/simulated?status=cancel`,
-    line_items: parsed.data.items.map((item) => ({
-      quantity: item.quantity,
-      price_data: {
-        currency: "eur",
-        product_data: {
-          name: item.product.name,
+    if (dbProducts.length !== productIds.length) {
+      return NextResponse.json(
+        { error: "Uno o más productos no están disponibles" },
+        { status: 400 },
+      );
+    }
+
+    type DbProduct = { id: string; name: string; priceCents: number; stock: number };
+    const priceMap = new Map<string, DbProduct>(
+      (dbProducts as DbProduct[]).map((p) => [p.id, p]),
+    );
+
+    const lineItems = parsed.data.items.map((item) => {
+      const dbProduct = priceMap.get(item.product.id)!;
+      return { ...item, priceCents: dbProduct.priceCents, name: dbProduct.name };
+    });
+
+    const totalCents = lineItems.reduce(
+      (sum, item) => sum + item.priceCents * item.quantity,
+      0,
+    );
+
+    // Create Stripe session FIRST, only persist the order if Stripe succeeds
+    const session = await stripe.checkout.sessions.create({
+      mode: "payment",
+      success_url: `${appUrl}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${appUrl}/checkout?cancelled=true`,
+      line_items: lineItems.map((item) => ({
+        quantity: item.quantity,
+        price_data: {
+          currency: "eur",
+          product_data: { name: item.name },
+          unit_amount: item.priceCents,
         },
-        unit_amount: item.product.priceCents,
-      },
-    })),
-  });
+      })),
+    });
 
-  return NextResponse.json({ url: session.url, mode: "stripe" });
+    // Persist order only after Stripe session was created successfully
+    const order = await prisma.order.create({
+      data: {
+        status: "PENDING",
+        totalCents,
+        currency: "eur",
+        stripeSessionId: session.id,
+        items: {
+          create: lineItems.map((item) => ({
+            productId: item.product.id,
+            quantity: item.quantity,
+            priceCents: item.priceCents,
+          })),
+        },
+      },
+    });
+
+    // Update session metadata with the order id
+    await stripe.checkout.sessions.update(session.id, {
+      metadata: { orderId: order.id },
+    });
+
+    return NextResponse.json({ url: session.url, orderId: order.id });
+  } catch (err) {
+    console.error("[checkout] error:", err);
+    return NextResponse.json({ error: "Error interno del servidor" }, { status: 500 });
+  }
 }

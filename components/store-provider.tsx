@@ -9,6 +9,7 @@ import {
   useMemo,
   useState,
 } from "react";
+import { z } from "zod";
 
 interface StoreContextValue {
   items: CartItem[];
@@ -22,6 +23,23 @@ interface StoreContextValue {
 const StoreContext = createContext<StoreContextValue | null>(null);
 
 const STORAGE_KEY = "pc_selector_cart";
+const MAX_QUANTITY = 99;
+
+// Zod schema to validate cart data from localStorage
+const cartItemSchema = z.object({
+  product: z.object({
+    id: z.string(),
+    slug: z.string(),
+    name: z.string(),
+    brand: z.string(),
+    priceCents: z.number().int().positive(),
+    image: z.string(),
+    description: z.string(),
+    type: z.string(),
+  }).passthrough(),
+  quantity: z.number().int().positive().max(MAX_QUANTITY),
+});
+const cartSchema = z.array(cartItemSchema).max(50);
 
 export function StoreProvider({ children }: PropsWithChildren) {
   const [items, setItems] = useState<CartItem[]>(() => {
@@ -35,7 +53,13 @@ export function StoreProvider({ children }: PropsWithChildren) {
     }
 
     try {
-      return JSON.parse(raw) as CartItem[];
+      const parsed = JSON.parse(raw);
+      const validated = cartSchema.safeParse(parsed);
+      if (!validated.success) {
+        window.localStorage.removeItem(STORAGE_KEY);
+        return [];
+      }
+      return validated.data as CartItem[];
     } catch {
       window.localStorage.removeItem(STORAGE_KEY);
       return [];
@@ -53,7 +77,7 @@ export function StoreProvider({ children }: PropsWithChildren) {
         if (existing) {
           return currentItems.map((item) =>
             item.product.id === product.id
-              ? { ...item, quantity: item.quantity + 1 }
+              ? { ...item, quantity: Math.min(item.quantity + 1, MAX_QUANTITY) }
               : item,
           );
         }

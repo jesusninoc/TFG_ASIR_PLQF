@@ -3,9 +3,18 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  // Con Supabase se necesitan DOS strings:
+  //   - url            → conexión con pgbouncer (pooling) para queries en runtime
+  //   - directUrl      → conexión directa para prisma migrate / prisma db push
+  // En desarrollo local (Docker) ambas pueden ser la misma.
+  url       = env("DATABASE_URL")
+  directUrl = env("DATABASE_URL_UNPOOLED")
 }
+
+// ─────────────────────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────────────────────
 
 enum ComponentType {
   CPU
@@ -14,6 +23,7 @@ enum ComponentType {
   STORAGE
   GPU
   PSU
+  CASE
 }
 
 enum MemoryType {
@@ -26,18 +36,43 @@ enum StorageInterface {
   SATA
 }
 
+enum FormFactor {
+  MINI_ITX
+  MATX
+  ATX
+  E_ATX
+  XL_ATX
+}
+
+enum PsuEfficiency {
+  BRONZE_80PLUS
+  GOLD_80PLUS
+  PLATINUM_80PLUS
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+// ─────────────────────────────────────────────────────────────
+// Productos
+// ─────────────────────────────────────────────────────────────
+
 model Product {
-  id            String         @id @default(cuid())
-  slug          String         @unique
+  id            String        @id @default(cuid())
+  slug          String        @unique
   name          String
   brand         String
   description   String
   image         String
-  stock         Int            @default(0)
+  stock         Int           @default(0)
   priceCents    Int
   componentType ComponentType
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
 
   cpuSpec         CpuSpec?
   motherboardSpec MotherboardSpec?
@@ -45,7 +80,9 @@ model Product {
   storageSpec     StorageSpec?
   gpuSpec         GpuSpec?
   psuSpec         PsuSpec?
+  caseSpec        CaseSpec?
   cartItems       CartItem[]
+  orderItems      OrderItem[]
 }
 
 model CpuSpec {
@@ -61,6 +98,7 @@ model CpuSpec {
 model MotherboardSpec {
   productId   String     @id
   socket      String
+  formFactor  FormFactor
   memoryType  MemoryType
   maxMemoryGb Int
   m2Slots     Int
@@ -70,19 +108,19 @@ model MotherboardSpec {
 }
 
 model MemorySpec {
-  productId   String     @id
-  memoryType  MemoryType
-  speedMhz    Int
-  capacityGb  Int
-  modules     Int
+  productId  String     @id
+  memoryType MemoryType
+  speedMhz   Int
+  capacityGb Int
+  modules    Int
 
   product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 }
 
 model StorageSpec {
-  productId   String           @id
-  interface   StorageInterface
-  capacityGb  Int
+  productId  String           @id
+  interface  StorageInterface
+  capacityGb Int
 
   product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 }
@@ -96,12 +134,23 @@ model GpuSpec {
 }
 
 model PsuSpec {
-  productId   String @id
-  wattage     Int
-  efficiency  String
+  productId  String        @id
+  wattage    Int
+  efficiency PsuEfficiency
 
   product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 }
+
+model CaseSpec {
+  productId            String     @id
+  supportedFormFactors FormFactor[]
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+}
+
+// ─────────────────────────────────────────────────────────────
+// Carrito
+// ─────────────────────────────────────────────────────────────
 
 model Cart {
   id        String     @id @default(cuid())
@@ -121,6 +170,39 @@ model CartItem {
 
   @@unique([cartId, productId])
 }
+
+// ─────────────────────────────────────────────────────────────
+// Pedidos
+// ─────────────────────────────────────────────────────────────
+
+model Order {
+  id                    String      @id @default(cuid())
+  stripePaymentIntentId String?     @unique
+  stripeSessionId       String?     @unique
+  status                OrderStatus @default(PENDING)
+  totalCents            Int
+  currency              String      @default("eur")
+  customerEmail         String?
+  createdAt             DateTime    @default(now())
+  updatedAt             DateTime    @updatedAt
+
+  items OrderItem[]
+}
+
+model OrderItem {
+  id         String @id @default(cuid())
+  orderId    String
+  productId  String
+  quantity   Int
+  priceCents Int    // precio en el momento de la compra
+
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+}
+
+// ─────────────────────────────────────────────────────────────
+// FAQ
+// ─────────────────────────────────────────────────────────────
 
 model FaqEntry {
   id        String   @id @default(cuid())

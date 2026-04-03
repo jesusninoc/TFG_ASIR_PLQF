@@ -9,11 +9,12 @@ interface Message {
   role: "user" | "assistant";
   content: string;
   buildIds?: BuildIds;
+  buildTier?: string;
 }
 
 const INITIAL_MESSAGE: Message = {
   role: "assistant",
-  content: "Hola, soy tu asistente de hardware. Pídeme una build por presupuesto o ayuda con compatibilidad.",
+  content: "¡Hola! Soy Chipi, el asistente de hardware de la tienda. Cuéntame qué tipo de PC necesitas y con qué presupuesto, y te monto las mejores opciones con el stock actual. 🖥️",
 };
 
 export function AiAssistant() {
@@ -46,19 +47,61 @@ export function AiAssistant() {
     setLoading(true);
 
     try {
+      // Build conversation history to send to the API.
+      // - Build messages (multi-line component lists) are summarised so the LLM
+      //   sees clean context instead of truncated lists that lose the budget info.
+      // - Regular messages are capped at 500 chars (generous but not infinite).
+      const history = messages.map((m) => {
+        if (m.role === "assistant" && m.buildIds) {
+          const tier = m.buildTier ? `tier ${m.buildTier}` : "build generada";
+          return { role: m.role as "user" | "assistant", content: `[${tier}]` };
+        }
+        return {
+          role: m.role as "user" | "assistant",
+          content: m.content.length > 500 ? m.content.slice(0, 500) + "…" : m.content,
+        };
+      });
+
       const response = await fetch("/api/assistant", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question }),
+        body: JSON.stringify({ question, messages: history }),
       });
+
+      if (!response.ok) {
+        throw new Error(`Error del servidor (${response.status})`);
+      }
+
       const payload = await response.json();
-      setMessages((current) => [
-        ...current,
-        {
+      const newMessages: Message[] = [];
+
+      if (payload.builds && payload.builds.length > 0) {
+        // Intro message
+        if (payload.answer) {
+          newMessages.push({ role: "assistant", content: payload.answer });
+        }
+        // One message per build with its own button
+        for (const build of payload.builds) {
+          newMessages.push({
+            role: "assistant",
+            content: build.answer,
+            buildIds: build.buildIds,
+            buildTier: build.tier,
+          });
+        }
+      } else {
+        newMessages.push({
           role: "assistant",
           content: payload.answer ?? "No pude responder ahora.",
-          buildIds: payload.buildIds ?? undefined,
-        },
+        });
+      }
+
+      setMessages((current) => [...current, ...newMessages]);
+    } catch (err) {
+      console.error("[ai-assistant] fetch error:", err);
+      setMessages((current) => [
+        ...current,
+        { role: "assistant", content: "Lo siento, no puedo responder en este momento. Inténtalo de nuevo." },
       ]);
     } finally {
       setLoading(false);
@@ -222,7 +265,7 @@ export function AiAssistant() {
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
                       <path d="M5 12h14M12 5l7 7-7 7" />
                     </svg>
-                    Cargar build en el Builder
+                    Cargar esta build en el Builder
                   </button>
                 )}
               </div>

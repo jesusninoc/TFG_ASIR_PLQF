@@ -1,38 +1,60 @@
-export const stripeAppearance = {
+import type { Appearance } from "@stripe/stripe-js";
+
+/**
+ * Tema base de Stripe — se sobreescribe parcialmente en checkout/page.tsx
+ * para el paso de pago con las variables del sistema de diseño del proyecto.
+ */
+export const stripeAppearance: Appearance = {
   theme: "stripe",
-  inputs: "spaced",
-  labels: "auto",
   variables: {
-    colorPrimary: "#0570de",
+    colorPrimary: "#111110",
     colorBackground: "#ffffff",
-    colorText: "#30313d",
-    colorDanger: "#df1b41",
-    colorSuccess: "#0f6a4b",
-    colorWarning: "#b26b00",
-    colorTextSecondary: "#6b7280",
-    colorTextPlaceholder: "#9ca3af",
-    fontFamily:
-      "Ideal Sans, Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif",
-    spacingUnit: "2px",
+    colorText: "#111110",
+    colorDanger: "#DC2626",
+    colorSuccess: "#16A34A",
+    colorWarning: "#D97706",
+    colorTextSecondary: "#6B7280",
+    colorTextPlaceholder: "#9CA3AF",
+    fontFamily: "ui-sans-serif, system-ui, -apple-system, sans-serif",
+    spacingUnit: "3px",
     borderRadius: "8px",
   },
   rules: {
-    ".Tab": {
-      border: "1px solid #E0E6EB",
-      boxShadow:
-        "0px 1px 1px rgba(0, 0, 0, 0.03), 0px 3px 6px rgba(18, 42, 66, 0.02)",
-    },
-    ".Tab--selected": {
-      borderColor: "#E0E6EB",
-      boxShadow:
-        "0px 1px 1px rgba(0, 0, 0, 0.03), 0px 3px 6px rgba(18, 42, 66, 0.02), 0 0 0 2px #0570de",
-    },
     ".Input": {
-      border: "1px solid #E0E6EB",
-      boxShadow: "0 1px 1px rgba(0,0,0,0.03)",
+      border: "1px solid rgba(0,0,0,0.14)",
+      boxShadow: "none",
+      fontSize: "14px",
+    },
+    ".Input:focus": {
+      border: "1px solid #111110",
+      boxShadow: "0 0 0 3px rgba(17,17,16,0.08)",
     },
     ".Input--invalid": {
-      boxShadow: "0 0 0 2px #df1b41",
+      border: "1px solid #DC2626",
+      boxShadow: "0 0 0 3px rgba(220,38,38,0.08)",
+    },
+    ".Tab": {
+      border: "1px solid rgba(0,0,0,0.08)",
+      boxShadow: "none",
+      color: "#6B7280",
+    },
+    ".Tab--selected": {
+      border: "1px solid #111110",
+      boxShadow: "0 0 0 2px #111110",
+      color: "#111110",
+    },
+    ".Tab:hover": {
+      border: "1px solid rgba(0,0,0,0.2)",
+      color: "#111110",
+    },
+    ".Label": {
+      color: "#111110",
+      fontSize: "12px",
+      fontWeight: "500",
+    },
+    ".Error": {
+      color: "#DC2626",
+      fontSize: "12px",
     },
   },
-} as const;
+};

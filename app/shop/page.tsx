@@ -1,8 +1,14 @@
+/**
+ * app/shop/page.tsx
+ * Tienda — lee productos desde PostgreSQL vía Prisma.
+ */
+
 import Image from "next/image";
 import Link from "next/link";
 import { AddToCartButton } from "@/components/add-to-cart-button";
-import { products } from "@/lib/catalog";
 import { formatPrice } from "@/lib/compatibility";
+import { prisma } from "@/lib/prisma";
+import { dbProductsToTypes } from "@/lib/db-to-types";
 
 interface ShopSearchParams {
   q?: string;
@@ -13,71 +19,80 @@ interface ShopSearchParams {
   sort?: string;
 }
 
-function normalize(value?: string) {
-  return (value ?? "").trim().toLowerCase();
-}
-
 export default async function ShopPage({
   searchParams,
 }: {
   searchParams: Promise<ShopSearchParams>;
 }) {
   const params = await searchParams;
-  const query = normalize(params.q);
-  const selectedType = normalize(params.type);
-  const selectedBrand = normalize(params.brand);
-  const minPrice = Number(params.min ?? 0);
-  const maxPrice = Number(params.max ?? 0);
-  const sort = params.sort ?? "featured";
 
-  const types = Array.from(new Set(products.map((product) => product.type)));
-  const brands = Array.from(new Set(products.map((product) => product.brand))).sort();
+  // ── Fetch all products (for filter options) and filtered products ──
+  const [allRaw, brandsRaw, typesRaw] = await Promise.all([
+    // Filtered products for the grid
+    prisma.product.findMany({
+      where: {
+        ...(params.type ? { componentType: params.type.toUpperCase() as never } : {}),
+        ...(params.brand ? { brand: { equals: params.brand, mode: "insensitive" } } : {}),
+        ...(params.q
+          ? {
+              OR: [
+                { name: { contains: params.q, mode: "insensitive" } },
+                { description: { contains: params.q, mode: "insensitive" } },
+                { brand: { contains: params.q, mode: "insensitive" } },
+              ],
+            }
+          : {}),
+        ...(params.min || params.max
+          ? {
+              priceCents: {
+                ...(params.min ? { gte: Number(params.min) * 100 } : {}),
+                ...(params.max ? { lte: Number(params.max) * 100 } : {}),
+              },
+            }
+          : {}),
+      },
+      orderBy:
+        params.sort === "price-asc"
+          ? { priceCents: "asc" }
+          : params.sort === "price-desc"
+          ? { priceCents: "desc" }
+          : params.sort === "name"
+          ? { name: "asc" }
+          : { createdAt: "asc" },
+      include: {
+        cpuSpec: true,
+        motherboardSpec: true,
+        memorySpec: true,
+        storageSpec: true,
+        gpuSpec: true,
+        psuSpec: true,
+        caseSpec: true,
+      },
+    }),
+    // Distinct brands
+    prisma.product.findMany({
+      select: { brand: true },
+      distinct: ["brand"],
+      orderBy: { brand: "asc" },
+    }),
+    // Distinct types
+    prisma.product.findMany({
+      select: { componentType: true },
+      distinct: ["componentType"],
+    }),
+  ]);
 
-  let filtered = products.filter((product) => {
-    if (query) {
-      const haystack = `${product.name} ${product.description} ${product.brand}`.toLowerCase();
-      if (!haystack.includes(query)) return false;
-    }
-
-    if (selectedType && product.type.toLowerCase() !== selectedType) {
-      return false;
-    }
-
-    if (selectedBrand && product.brand.toLowerCase() !== selectedBrand) {
-      return false;
-    }
-
-    const price = product.priceCents / 100;
-    if (minPrice > 0 && price < minPrice) {
-      return false;
-    }
-
-    if (maxPrice > 0 && price > maxPrice) {
-      return false;
-    }
-
-    return true;
-  });
-
-  if (sort === "price-asc") {
-    filtered = [...filtered].sort((a, b) => a.priceCents - b.priceCents);
-  } else if (sort === "price-desc") {
-    filtered = [...filtered].sort((a, b) => b.priceCents - a.priceCents);
-  } else if (sort === "name") {
-    filtered = [...filtered].sort((a, b) => a.name.localeCompare(b.name, "es"));
-  }
+  const filtered = dbProductsToTypes(allRaw);
+  const brands = brandsRaw.map((b) => b.brand);
+  const types = typesRaw.map((t) => t.componentType.toLowerCase());
 
   return (
-    /* Full-bleed two-column layout — sidebar gray, main white, like polar.sh */
     <div className="flex min-h-[calc(100vh-57px)]" style={{ borderTop: "1px solid var(--border)" }}>
 
       {/* ─── Sidebar ─────────────────────────────────────────── */}
       <aside
         className="hidden w-[220px] shrink-0 lg:block"
-        style={{
-          background: "var(--bg-sidebar)",
-          borderRight: "1px solid var(--border)",
-        }}
+        style={{ background: "var(--bg-sidebar)", borderRight: "1px solid var(--border)" }}
       >
         <div className="sticky top-[57px] overflow-y-auto" style={{ maxHeight: "calc(100vh - 57px)" }}>
           <div className="px-4 py-4" style={{ borderBottom: "1px solid var(--border)" }}>
@@ -85,20 +100,16 @@ export default async function ShopPage({
           </div>
 
           <form className="p-4 space-y-5" method="GET">
-            {/* Search */}
             <div className="space-y-1.5">
               <label className="text-[11px] font-medium text-[var(--text-secondary)]" htmlFor="q">Buscar</label>
               <input
-                id="q"
-                type="text"
-                name="q"
+                id="q" type="text" name="q"
                 defaultValue={params.q ?? ""}
                 placeholder="CPU, DDR5…"
                 className="input-base w-full px-3 py-1.5 text-xs"
               />
             </div>
 
-            {/* Type */}
             <div className="space-y-1.5">
               <label className="text-[11px] font-medium text-[var(--text-secondary)]" htmlFor="type">Tipo</label>
               <select id="type" name="type" defaultValue={params.type ?? ""} className="input-base w-full px-3 py-1.5 text-xs">
@@ -109,7 +120,6 @@ export default async function ShopPage({
               </select>
             </div>
 
-            {/* Brand */}
             <div className="space-y-1.5">
               <label className="text-[11px] font-medium text-[var(--text-secondary)]" htmlFor="brand">Marca</label>
               <select id="brand" name="brand" defaultValue={params.brand ?? ""} className="input-base w-full px-3 py-1.5 text-xs">
@@ -120,7 +130,6 @@ export default async function ShopPage({
               </select>
             </div>
 
-            {/* Price range */}
             <div className="space-y-1.5">
               <span className="text-[11px] font-medium text-[var(--text-secondary)]">Precio (€)</span>
               <div className="flex items-center gap-2">
@@ -130,7 +139,6 @@ export default async function ShopPage({
               </div>
             </div>
 
-            {/* Sort */}
             <div className="space-y-1.5">
               <label className="text-[11px] font-medium text-[var(--text-secondary)]" htmlFor="sort">Ordenar</label>
               <select id="sort" name="sort" defaultValue={params.sort ?? "featured"} className="input-base w-full px-3 py-1.5 text-xs">
@@ -151,14 +159,8 @@ export default async function ShopPage({
 
       {/* ─── Main content ─────────────────────────────────────── */}
       <main className="flex-1 bg-white">
-        {/* Toolbar */}
-        <div
-          className="flex items-center justify-between px-6 py-3"
-          style={{ borderBottom: "1px solid var(--border)" }}
-        >
-          <div>
-            <h1 className="text-sm font-semibold text-[var(--text-primary)]">Tienda</h1>
-          </div>
+        <div className="flex items-center justify-between px-6 py-3" style={{ borderBottom: "1px solid var(--border)" }}>
+          <h1 className="text-sm font-semibold text-[var(--text-primary)]">Tienda</h1>
           <p className="text-xs text-[var(--text-secondary)]">
             {filtered.length} producto{filtered.length === 1 ? "" : "s"}
           </p>
@@ -171,14 +173,12 @@ export default async function ShopPage({
             <a href="/shop" className="btn-secondary mt-4 px-4 py-2 text-xs">Limpiar filtros</a>
           </div>
         ) : (
-          /* Grid mesh — no gaps, shared borders between cells */
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5 grid-mesh">
             {filtered.map((product) => (
               <article
                 key={product.id}
                 className="grid-mesh-item group flex flex-col bg-white transition-colors hover:bg-[var(--bg-subtle)]"
               >
-                {/* Image area */}
                 <Link
                   href={`/product/${product.slug}`}
                   className="block h-44 overflow-hidden"
@@ -193,7 +193,6 @@ export default async function ShopPage({
                   />
                 </Link>
 
-                {/* Info */}
                 <div className="flex flex-1 flex-col gap-4 p-4">
                   <div className="flex-1 space-y-1">
                     <div className="flex items-start justify-between gap-2">

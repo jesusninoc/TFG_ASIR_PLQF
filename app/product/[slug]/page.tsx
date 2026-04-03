@@ -1,79 +1,96 @@
+/**
+ * app/product/[slug]/page.tsx
+ * Página de producto individual — datos desde PostgreSQL.
+ */
+
 import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AddToCartButton } from "@/components/add-to-cart-button";
-import { products } from "@/lib/catalog";
 import { formatPrice } from "@/lib/compatibility";
-import { Product } from "@/lib/types";
+import { prisma } from "@/lib/prisma";
+import { dbProductToType } from "@/lib/db-to-types";
+import type { Product } from "@/lib/types";
+import type {
+  CpuProduct,
+  MotherboardProduct,
+  MemoryProduct,
+  StorageProduct,
+  GpuProduct,
+  PsuProduct,
+  CaseProduct,
+} from "@/lib/types";
 
-function getSpecs(product: Product) {
+// ─── Static params para build estático ───────────────────────────────────────
+
+export async function generateStaticParams() {
+  const products = await prisma.product.findMany({ select: { slug: true } });
+  return products.map((p) => ({ slug: p.slug }));
+}
+
+// ─── Spec table helper ────────────────────────────────────────────────────────
+
+function getSpecs(product: Product): [string, string][] {
   switch (product.type) {
-    case "cpu":
+    case "cpu": {
+      const p = product as CpuProduct;
       return [
-        ["Socket", product.socket],
-        ["Núcleos", String(product.cores)],
-        ["Hilos", String(product.threads)],
-        ["TDP", `${product.tdpWatts}W`],
+        ["Socket", p.socket],
+        ["Núcleos", String(p.cores)],
+        ["Hilos", String(p.threads)],
+        ["TDP", `${p.tdpWatts}W`],
       ];
-    case "motherboard":
+    }
+    case "motherboard": {
+      const p = product as MotherboardProduct;
       return [
-        ["Socket", product.socket],
-        ["Formato", product.formFactor],
-        ["Memoria", product.memoryType],
-        ["M.2", String(product.m2Slots)],
-        ["SATA", String(product.sataPorts)],
+        ["Socket", p.socket],
+        ["Formato", p.formFactor],
+        ["Memoria", p.memoryType],
+        ["M.2", String(p.m2Slots)],
+        ["SATA", String(p.sataPorts)],
       ];
-    case "memory":
+    }
+    case "memory": {
+      const p = product as MemoryProduct;
       return [
-        ["Tipo", product.memoryType],
-        ["Frecuencia", `${product.speedMhz} MHz`],
-        ["Capacidad", `${product.capacityGb} GB`],
-        ["Módulos", String(product.modules)],
+        ["Tipo", p.memoryType],
+        ["Frecuencia", `${p.speedMhz} MHz`],
+        ["Capacidad", `${p.capacityGb} GB`],
+        ["Módulos", String(p.modules)],
       ];
-    case "storage":
+    }
+    case "storage": {
+      const p = product as StorageProduct;
       return [
-        ["Interfaz", product.interface],
-        ["Capacidad", `${product.capacityGb} GB`],
+        ["Interfaz", p.interface],
+        ["Capacidad", `${p.capacityGb} GB`],
       ];
-    case "gpu":
+    }
+    case "gpu": {
+      const p = product as GpuProduct;
       return [
-        ["VRAM", `${product.vramGb} GB`],
-        ["TDP", `${product.tdpWatts}W`],
+        ["VRAM", `${p.vramGb} GB`],
+        ["TDP", `${p.tdpWatts}W`],
       ];
-    case "psu":
+    }
+    case "psu": {
+      const p = product as PsuProduct;
       return [
-        ["Potencia", `${product.wattage}W`],
-        ["Eficiencia", product.efficiency],
+        ["Potencia", `${p.wattage}W`],
+        ["Eficiencia", p.efficiency],
       ];
-    case "case":
-      return [["Formatos soportados", product.supportedFormFactors.join(", ")]];
+    }
+    case "case": {
+      const p = product as CaseProduct;
+      return [["Formatos soportados", p.supportedFormFactors.join(", ")]];
+    }
     default:
       return [];
   }
 }
 
-function getReviews(product: Product) {
-  return [
-    {
-      author: "Laura M.",
-      rating: 5,
-      title: "Rinde exactamente como esperaba",
-      body: `Muy buena compra para mi build. ${product.name} se siente premium y estable incluso en sesiones largas.`,
-    },
-    {
-      author: "Carlos G.",
-      rating: 4,
-      title: "Gran relación calidad/precio",
-      body: "Instalación sencilla, buen acabado y sin sorpresas. Lo recomendaría para gaming y productividad.",
-    },
-    {
-      author: "Marta R.",
-      rating: 5,
-      title: "Perfecto para actualizar mi PC",
-      body: "El envío fue rápido y el componente llegó impecable. El rendimiento final superó mis expectativas.",
-    },
-  ];
-}
+// ─── Page ────────────────────────────────────────────────────────────────────
 
 export default async function ProductPage({
   params,
@@ -81,19 +98,40 @@ export default async function ProductPage({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  const product = products.find((item) => item.slug === slug);
 
-  if (!product) {
-    notFound();
-  }
+  const raw = await prisma.product.findUnique({
+    where: { slug },
+    include: {
+      cpuSpec: true,
+      motherboardSpec: true,
+      memorySpec: true,
+      storageSpec: true,
+      gpuSpec: true,
+      psuSpec: true,
+      caseSpec: true,
+    },
+  });
+
+  if (!raw) notFound();
+
+  const product = dbProductToType(raw);
+  if (!product) notFound();
+
+  // Related products — same type, excluding self
+  const relatedRaw = await prisma.product.findMany({
+    where: { componentType: raw.componentType, id: { not: raw.id } },
+    take: 3,
+    include: {
+      cpuSpec: true, motherboardSpec: true, memorySpec: true,
+      storageSpec: true, gpuSpec: true, psuSpec: true, caseSpec: true,
+    },
+  });
+  const related = relatedRaw.flatMap((r) => {
+    const c = dbProductToType(r);
+    return c ? [c] : [];
+  });
 
   const specs = getSpecs(product);
-  const reviews = getReviews(product);
-  const average = reviews.reduce((sum, review) => sum + review.rating, 0) / reviews.length;
-  const stars = "★".repeat(Math.round(average));
-  const related = products
-    .filter((item) => item.type === product.type && item.id !== product.id)
-    .slice(0, 3);
 
   return (
     <main className="mx-auto w-full max-w-[1200px] px-6 pb-14 pt-8">
@@ -106,7 +144,7 @@ export default async function ProductPage({
       </p>
 
       <section className="mt-5 grid gap-5 lg:grid-cols-[1.08fr_0.92fr]">
-        {/* Images */}
+        {/* Image */}
         <div>
           <div className="relative rounded-xl p-8" style={{ border: "1px solid var(--border)" }}>
             <div className="flex min-h-[520px] items-center justify-center">
@@ -120,23 +158,10 @@ export default async function ProductPage({
               />
             </div>
           </div>
-
           <div className="mt-3 grid grid-cols-3 gap-2">
-            {Array.from({ length: 3 }).map((_, index) => (
-              <div
-                key={`${product.id}-${index}`}
-                className={`overflow-hidden rounded-lg p-2 transition-colors cursor-pointer ${
-                  index === 0 ? "ring-1 ring-[var(--text-primary)]" : ""
-                }`}
-                style={{ border: "1px solid var(--border)" }}
-              >
-                <Image
-                  src={product.image}
-                  alt={`${product.name} vista ${index + 1}`}
-                  width={400}
-                  height={300}
-                  className="h-24 w-full object-contain"
-                />
+            {[0, 1, 2].map((i) => (
+              <div key={i} className={`overflow-hidden rounded-lg p-2 ${i === 0 ? "ring-1 ring-[var(--text-primary)]" : ""}`} style={{ border: "1px solid var(--border)" }}>
+                <Image src={product.image} alt={`${product.name} vista ${i + 1}`} width={400} height={300} className="h-24 w-full object-contain" />
               </div>
             ))}
           </div>
@@ -145,18 +170,8 @@ export default async function ProductPage({
         {/* Info panel */}
         <div className="rounded-xl p-6">
           <p className="text-xs font-medium uppercase tracking-widest text-[var(--text-tertiary)]">{product.type}</p>
-          <h1 className="mt-2 text-3xl font-semibold leading-tight text-[var(--text-primary)]">
-            {product.name}
-          </h1>
+          <h1 className="mt-2 text-3xl font-semibold leading-tight text-[var(--text-primary)]">{product.name}</h1>
           <p className="mt-1 text-sm text-[var(--text-secondary)]">{product.brand}</p>
-
-          <div className="mt-4 flex items-center gap-3 pb-4" style={{ borderBottom: "1px solid var(--border)" }}>
-            <span className="text-sm text-[var(--text-secondary)]">{average.toFixed(1)}</span>
-            <span className="text-amber-500 text-sm">{stars}</span>
-            <a href="#reviews" className="text-sm font-medium text-[var(--accent)] hover:underline">
-              {reviews.length} reseñas
-            </a>
-          </div>
 
           <div className="mt-4 pb-4" style={{ borderBottom: "1px solid var(--border)" }}>
             <p className="text-3xl font-semibold text-[var(--text-primary)]">{formatPrice(product.priceCents)}</p>
@@ -164,11 +179,7 @@ export default async function ProductPage({
 
           <div className="mt-4 flex flex-wrap gap-2 pb-4" style={{ borderBottom: "1px solid var(--border)" }}>
             {specs.slice(0, 4).map(([label, value]) => (
-              <span
-                key={label}
-                className="rounded-md bg-[var(--bg-subtle)] px-2.5 py-1 text-xs font-medium text-[var(--text-secondary)]"
-                style={{ border: "1px solid var(--border)" }}
-              >
+              <span key={label} className="rounded-md bg-[var(--bg-subtle)] px-2.5 py-1 text-xs font-medium text-[var(--text-secondary)]" style={{ border: "1px solid var(--border)" }}>
                 {value}
               </span>
             ))}
@@ -186,24 +197,18 @@ export default async function ProductPage({
           <article className="mt-5">
             <h2 className="text-sm font-semibold text-[var(--text-primary)]">Incluye</h2>
             <ul className="mt-2 space-y-1.5 text-sm text-[var(--text-secondary)]">
-              <li className="flex items-center gap-2">
-                <span className="h-1 w-1 rounded-full bg-[var(--text-tertiary)]" />
-                Garantía oficial de 3 años
-              </li>
-              <li className="flex items-center gap-2">
-                <span className="h-1 w-1 rounded-full bg-[var(--text-tertiary)]" />
-                Soporte técnico de compatibilidad
-              </li>
-              <li className="flex items-center gap-2">
-                <span className="h-1 w-1 rounded-full bg-[var(--text-tertiary)]" />
-                Envío 24/48h · Devolución 30 días
-              </li>
+              {["Garantía oficial de 3 años", "Soporte técnico de compatibilidad", "Envío 24/48h · Devolución 30 días"].map((item) => (
+                <li key={item} className="flex items-center gap-2">
+                  <span className="h-1 w-1 rounded-full bg-[var(--text-tertiary)]" />
+                  {item}
+                </li>
+              ))}
             </ul>
           </article>
         </div>
       </section>
 
-      <section className="mt-5 grid gap-5 lg:grid-cols-2">
+      <section className="mt-5">
         {/* Specs */}
         <article className="rounded-xl bg-[var(--bg-card)] p-5">
           <h2 className="text-sm font-semibold text-[var(--text-primary)]">Especificaciones</h2>
@@ -216,30 +221,6 @@ export default async function ProductPage({
             ))}
           </dl>
         </article>
-
-        {/* Reviews */}
-        <article id="reviews" className="rounded-xl bg-[var(--bg-card)] p-5">
-          <div className="flex items-end justify-between">
-            <h2 className="text-sm font-semibold text-[var(--text-primary)]">Reseñas</h2>
-            <p className="text-xs text-[var(--text-secondary)]">⭐ {average.toFixed(1)} / 5</p>
-          </div>
-          <div className="mt-3 space-y-2">
-            {reviews.map((review) => (
-              <article
-                key={review.author + review.title}
-                className="rounded-lg bg-[var(--bg-subtle)] p-3"
-                style={{ border: "1px solid var(--border)" }}
-              >
-                <div className="flex items-center justify-between">
-                  <p className="text-sm font-medium text-[var(--text-primary)]">{review.author}</p>
-                  <p className="text-xs text-amber-500">{"★".repeat(review.rating)}</p>
-                </div>
-                <p className="mt-1 text-xs font-medium text-[var(--text-primary)]">{review.title}</p>
-                <p className="mt-0.5 text-xs text-[var(--text-secondary)]">{review.body}</p>
-              </article>
-            ))}
-          </div>
-        </article>
       </section>
 
       {related.length > 0 && (
@@ -247,17 +228,10 @@ export default async function ProductPage({
           <h2 className="mb-3 text-base font-semibold text-[var(--text-primary)]">Productos relacionados</h2>
           <div className="grid gap-3 md:grid-cols-3">
             {related.map((item) => (
-              <Link
-                key={item.id}
-                href={`/product/${item.slug}`}
-                className="rounded-xl bg-[var(--bg-card)] p-4 transition-shadow hover:shadow-[0_4px_16px_rgba(0,0,0,0.07)]"
-                style={{ border: "1px solid var(--border)" }}
-              >
+              <Link key={item.id} href={`/product/${item.slug}`} className="rounded-xl bg-[var(--bg-card)] p-4 transition-shadow hover:shadow-[0_4px_16px_rgba(0,0,0,0.07)]" style={{ border: "1px solid var(--border)" }}>
                 <p className="text-sm font-medium text-[var(--text-primary)]">{item.name}</p>
                 <p className="mt-0.5 text-xs text-[var(--text-secondary)]">{item.brand}</p>
-                <p className="mt-2 text-sm font-semibold text-[var(--text-primary)]">
-                  {formatPrice(item.priceCents)}
-                </p>
+                <p className="mt-2 text-sm font-semibold text-[var(--text-primary)]">{formatPrice(item.priceCents)}</p>
               </Link>
             ))}
           </div>

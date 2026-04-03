@@ -113,3 +113,83 @@ export interface FaqEntry {
   question: string;
   answer: string;
 }
+
+// ─── Build Engine types ────────────────────────────────────────────────────────
+
+export type UseCase =
+  | "gaming"
+  | "workstation_gpu"
+  | "workstation_cpu"
+  | "office";
+
+export interface BrandFilters {
+  cpu?: string[];
+  gpu?: string[];
+  ram?: string[];
+  storage?: string[];
+  motherboard?: string[];
+  psu?: string[];
+  case?: string[];
+}
+
+export interface MinSpecs {
+  cpuCores?: number;
+  gpuVramGb?: number;
+  memoryGb?: number;
+  storageGb?: number;
+}
+
+export interface BuildFilters {
+  budgetCents: number;
+  useCase?: UseCase;
+  preferBrands?: BrandFilters;
+  excludeBrands?: BrandFilters;
+  minSpecs?: MinSpecs;
+  requireDedicatedGpu?: boolean;
+  preferFormFactor?: FormFactor;
+}
+
+export type BuildTier = "budget" | "mid" | "premium";
+
+export interface BuildResult {
+  tier: BuildTier;
+  build: PcBuildSelection;
+  report: CompatibilityReport;
+  totalPriceCents: number;
+}
+
+// ─── Intent Parser types ───────────────────────────────────────────────────────
+
+export interface ConversationMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export type IntentType =
+  | "build"
+  | "clarify"
+  | "faq"
+  | "unknown"
+  | "order_status"
+  | "escalate"
+  | "catalog_search";
+
+export interface OrderQuery {
+  email?: string;
+}
+
+export interface CatalogQuery {
+  componentType?: string;
+  brand?: string;
+  maxPriceCents?: number;
+  minPriceCents?: number;
+}
+
+export interface AssistantIntent {
+  intent: IntentType;
+  buildFilters?: BuildFilters;
+  clarifyQuestion?: string;
+  faqQuery?: string;
+  orderQuery?: OrderQuery;
+  catalogQuery?: CatalogQuery;
+}

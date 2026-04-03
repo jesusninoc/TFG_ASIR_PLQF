@@ -1,6 +1,5 @@
-version: "3.9"
-
 services:
+  # ── PostgreSQL ────────────────────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
     container_name: pc-selector-db
@@ -13,6 +12,58 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pcselector -d pcselector"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── Stripe CLI ────────────────────────────────────────────────────────────
+  #
+  # Reenvía los eventos de Stripe a tu servidor Next.js local.
+  # En producción (Vercel) esto NO se usa — Stripe llama directamente
+  # al endpoint /api/stripe/webhook de tu app desplegada.
+  #
+  # Primer arranque:
+  #   docker-compose up stripe-cli
+  #   → Imprime un código de emparejamiento, ábrelo en el navegador
+  #     y autoriza la CLI con tu cuenta de Stripe.
+  #   → Tras autorizar, imprime el webhook signing secret (whsec_...)
+  #     Cópialo en .env.local como STRIPE_WEBHOOK_SECRET.
+  #
+  # Usos posteriores:
+  #   docker-compose up          → arranca postgres + stripe-cli juntos
+  #   docker-compose up -d       → en segundo plano
+  #   docker-compose logs -f stripe-cli   → ver eventos en tiempo real
+  #
+  stripe-cli:
+    image: stripe/stripe-cli:latest
+    container_name: pc-selector-stripe
+    restart: unless-stopped
+    # El volumen persiste las credenciales de autenticación entre reinicios.
+    # Sin él tendrías que volver a autorizarte cada vez.
+    volumes:
+      - stripe_config:/root/.config/stripe
+    environment:
+      # La clave de API se inyecta desde tu .env.local / variables de entorno del host.
+      # Asegúrate de tener STRIPE_SECRET_KEY exportada antes de ejecutar docker-compose,
+      # o añade un archivo .env en la raíz del proyecto (docker-compose lo carga automáticamente).
+      STRIPE_API_KEY: ${STRIPE_SECRET_KEY}
+      # URL del servidor Next.js en el host. "host.docker.internal" resuelve al localhost
+      # del equipo host tanto en Docker Desktop (Mac/Windows) como en Linux con la flag
+      # --add-host que añadimos en extra_hosts.
+      STRIPE_DEVICE_NAME: pc-selector-dev
+    extra_hosts:
+      # Necesario en Linux para que el contenedor resuelva "host.docker.internal"
+      - "host.docker.internal:host-gateway"
+    command: >
+      listen
+      --forward-to http://host.docker.internal:3000/api/stripe/webhook
+      --events payment_intent.succeeded,payment_intent.payment_failed,checkout.session.completed
+    depends_on:
+      postgres:
+        condition: service_healthy
 
 volumes:
   postgres_data:
+  stripe_config:
