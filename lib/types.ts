@@ -147,6 +147,15 @@ export interface BuildFilters {
   minSpecs?: MinSpecs;
   requireDedicatedGpu?: boolean;
   preferFormFactor?: FormFactor;
+  lockedComponents?: {
+    cpu?: string;
+    gpu?: string;
+    motherboard?: string;
+    memory?: string;
+    storage?: string;
+    psu?: string;
+    case?: string;
+  };
 }
 
 export type BuildTier = "budget" | "mid" | "premium";
@@ -192,4 +201,64 @@ export interface AssistantIntent {
   faqQuery?: string;
   orderQuery?: OrderQuery;
   catalogQuery?: CatalogQuery;
+  recommendComponentQuery?: RecommendComponentQuery;
+}
+
+// ─── Agent System Types ─────────────────────────────────────────────────────────
+
+export type PersonalityType = "educational";
+
+export interface RecommendComponentQuery {
+  componentType: ComponentType;
+  criteria?: {
+    budgetCents?: number;
+    preferBrands?: string[];
+    minSpecs?: Partial<MinSpecs>;
+    useCase?: UseCase;
+  };
+}
+
+export interface ComponentRecommendation {
+  id: string;
+  name: string;
+  image: string;
+  priceCents: number;
+  componentType: ComponentType;
+  brand: string;
+  keySpecs: string[];
+  reasoning: string;
+  productLink: string;
+  compatibilityNote?: string;
+}
+
+export type PartialSelection = Partial<Record<keyof PcBuildSelection, string>>;
+
+export type BuildIds = PartialSelection;
+
+export interface BuildMessage {
+  tier: BuildTier;
+  answer: string;
+  totalPriceCents: number;
+  buildIds: BuildIds;
+  componentRecommendations?: ComponentRecommendation[];
+}
+
+export interface AgentResponse {
+  answer: string;
+  references: string[];
+  messageType: "clarify" | "faq" | "catalog" | "components" | "build" | "unknown" | "order_status" | "escalate";
+  components?: ComponentRecommendation[];
+  builds?: BuildMessage[];
+  catalogResults?: Product[];
+  clarifyQuestion?: string;
+  orderData?: unknown;
+  builderPayload?: {
+    fullBuildIds?: BuildIds;
+    partialSelection?: PartialSelection;
+  };
+  // NUEVO: Campo para acciones de navegación automática
+  navigation?: {
+    path: string;
+    buildIds?: BuildIds;
+  };
 }

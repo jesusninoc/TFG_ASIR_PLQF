@@ -8,6 +8,7 @@ import {
   InputHTMLAttributes,
   SelectHTMLAttributes,
 } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   Elements,
@@ -21,7 +22,9 @@ import { formatPrice } from "@/lib/compatibility";
 import { stripeAppearance } from "@/lib/stripe-appearance";
 
 const publishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? "";
-const stripePromise = publishableKey ? loadStripe(publishableKey) : null;
+const stripePromise = publishableKey ? loadStripe(publishableKey, {
+  developerTools: {assistant: {enabled: false}},
+}) : null;
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 
@@ -549,11 +552,10 @@ export default function CheckoutPage() {
   useEffect(() => {
     if (items.length === 0) { setMode("empty"); return; }
     if (!publishableKey)    { setMode("no-key"); return; }
-    // Only bootstrap when stepping to payment, and only once per cart+shipping combination
     if (step !== "payment") return;
 
     const key = `${cartKey}|${shippingCents}`;
-    if (bootstrappedKey.current === key) return; // already initialized for this combination
+    if (bootstrappedKey.current === key) return;
 
     const bootstrap = async () => {
       try {
@@ -573,13 +575,13 @@ export default function CheckoutPage() {
         if (payload.clientSecret) { setClientSecret(payload.clientSecret); setMode("stripe"); return; }
         throw new Error("Respuesta inesperada del servidor.");
       } catch (err) {
-        bootstrappedKey.current = null; // allow retry
+        bootstrappedKey.current = null;
         setError(err instanceof Error ? err.message : "Error al preparar el checkout.");
         setMode("no-key");
       }
     };
     bootstrap();
-  }, [step, cartKey, shippingCents, items, publishableKey]);
+  }, [step, cartKey, shippingCents, items]);
 
   // ── Shipping address summary pill ──
   const shippingAddressSummary = shippingData.address
@@ -679,7 +681,7 @@ export default function CheckoutPage() {
               {mode === "empty" && (
                 <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-subtle)] p-4 text-sm text-[var(--text-secondary)]">
                   Tu carrito está vacío.{" "}
-                  <a href="/shop" className="font-medium text-[var(--text-primary)] underline">Ir a la tienda</a>
+                  <Link href="/shop" className="font-medium text-[var(--text-primary)] underline">Ir a la tienda</Link>
                 </div>
               )}
 

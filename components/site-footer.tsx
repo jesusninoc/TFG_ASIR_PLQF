@@ -22,10 +22,10 @@ const NAV = [
   {
     title: "Compañía",
     links: [
-      { label: "Acerca de", href: "#" },
-      { label: "Contacto", href: "#" },
-      { label: "Privacidad", href: "#" },
-      { label: "Términos", href: "#" },
+      { label: "Acerca de", href: "/about" },
+      { label: "Contacto", href: "/contact" },
+      { label: "Privacidad", href: "/privacy" },
+      { label: "Términos", href: "/terms" },
     ],
   },
 ];
@@ -37,12 +37,9 @@ export function SiteFooter() {
         {/* Grid-mesh: brand + 3 nav columns */}
         <div className="grid-mesh mb-12 grid grid-cols-2 md:grid-cols-4">
           {/* Brand column */}
-          <div className="grid-mesh-item col-span-2 flex flex-col justify-between gap-10 p-6 md:col-span-1">
+          <div className="grid-mesh-item col-span-2 flex flex-col justify-between gap-5 p-6 md:col-span-1">
             <div className="flex items-center gap-2">
-              <span className="flex h-7 w-7 items-center justify-center rounded-md bg-black text-xs font-bold text-white">
-                P
-              </span>
-              <span className="font-semibold text-[var(--text-primary)]">PC Store</span>
+              <img src="/logo-cropped.png" alt="Logo" className="w-40" />
             </div>
             <p className="text-xs leading-relaxed text-[var(--text-secondary)]">
               Configurador inteligente de componentes con validación de compatibilidad en tiempo real y asistencia de IA incluida.

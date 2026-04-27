@@ -11,16 +11,6 @@ import {
   StorageProduct,
 } from "@/lib/types";
 
-const cpuImage =
-  "https://images.unsplash.com/photo-1591799265444-d66432b91588?auto=format&fit=crop&w=1200&q=80";
-const motherboardImage =
-  "https://images.unsplash.com/photo-1587202372775-e229f172b9d7?auto=format&fit=crop&w=1200&q=80";
-const memoryImage =
-  "https://images.unsplash.com/photo-1562976540-1502c2145186?auto=format&fit=crop&w=1200&q=80";
-const storageImage =
-  "https://images.unsplash.com/photo-1597872200969-2b65d56bd16b?auto=format&fit=crop&w=1200&q=80";
-const gpuImage =
-  "https://images.unsplash.com/photo-1587135991058-8816c028691f?auto=format&fit=crop&w=1200&q=80";
 const psuImage =
   "https://images.unsplash.com/photo-1540829917886-91ab031b1764?auto=format&fit=crop&w=1200&q=80";
 const caseImage =
@@ -413,7 +403,7 @@ const memoryProducts: MemoryProduct[] = [
   { id: "ram-ddr5-48-6800", slug: "patriot-viper-48-ddr5-6800", name: "Patriot Viper 48GB (2x24GB) DDR5 6800", brand: "Patriot", priceCents: 22900, image: "/components/ram/1135-memoria-ram-patriot-viper-elite-5-ultra-48gb-2x24gb-ddr5-6000mhz-cl28-rgb-xmp-expo.jpg", description: "Capacidad y velocidad equilibradas.", type: "memory", memoryType: "DDR5", speedMhz: 6800, capacityGb: 48, modules: 2 },
   { id: "ram-ddr4-16-3200", slug: "kingston-fury-16-ddr4-3200", name: "Kingston Fury 16GB (1x16GB) DDR4 3200", brand: "Kingston", priceCents: 4900, image: "/components/ram/1320-memoria-ram-kingston-fury-renegade-rgb-16gb-1x16gb-ddr4-3200mhz-cl16-intel-xmp-rgb-negro.webp", description: "DDR4 básica para equipos económicos.", type: "memory", memoryType: "DDR4", speedMhz: 3200, capacityGb: 16, modules: 2 },
   { id: "ram-ddr4-32-3200", slug: "kingston-fury-32-ddr4-3200", name: "Kingston Fury 32GB (1x32GB) DDR4 3200", brand: "Kingston", priceCents: 7900, image: "/components/ram/1937-memoria-ram-kingston-32gb-ddr4-3200mt-s-fury-beast-rgb.webp", description: "32GB DDR4 asequibles.", type: "memory", memoryType: "DDR4", speedMhz: 3200, capacityGb: 32, modules: 2 },
-  { id: "ram-ddr4-32-3600", slug: "kingston-fury-32-ddr4-3600", name: "Kingston Fury 32GB (2x16GB) DDR4 3600", brand: "Kingston", priceCents: 9900, image: "/componenets/ram/1986-memoria-ram-kingston-fury-beast-rgb-32gb-2x16gb-ddr4-3600mhz-cl18-intel-xmp-rgb-negro.webp", description: "DDR4 rápida para gaming.", type: "memory", memoryType: "DDR4", speedMhz: 3600, capacityGb: 32, modules: 2 },
+  { id: "ram-ddr4-32-3600", slug: "kingston-fury-32-ddr4-3600", name: "Kingston Fury 32GB (2x16GB) DDR4 3600", brand: "Kingston", priceCents: 9900, image: "/components/ram/1986-memoria-ram-kingston-fury-beast-rgb-32gb-2x16gb-ddr4-3600mhz-cl18-intel-xmp-rgb-negro.webp", description: "DDR4 rápida para gaming.", type: "memory", memoryType: "DDR4", speedMhz: 3600, capacityGb: 32, modules: 2 },
   { id: "ram-ddr4-64-3600", slug: "kingston-fury-64-ddr4-3600", name: "Kingston Fury 64GB (2x32GB) DDR4 3600", brand: "Kingston", priceCents: 17900, image: "/components/ram/1483-kingston-fury-beast-ddr4-3600-mhz-64gb-2x32gb-cl18.webp", description: "Gran capacidad DDR4.", type: "memory", memoryType: "DDR4", speedMhz: 3600, capacityGb: 64, modules: 2 },
   { id: "ram-ddr4-16-3600", slug: "corsair-lpx-16-ddr4-3600", name: "Corsair LPX 16GB (2x8GB) DDR4 3600", brand: "Corsair", priceCents: 5400, image: "/components/ram/1.webp", description: "Perfil bajo para torres compactas.", type: "memory", memoryType: "DDR4", speedMhz: 3600, capacityGb: 16, modules: 2 },
   { id: "ram-ddr4-32-4000", slug: "corsair-lpx-32-ddr4-4000", name: "Corsair LPX 32GB (2x16GB) DDR4 4000", brand: "Corsair", priceCents: 11900, image: "/components/ram/1843-memoria-ram-corsair-vengeance-lpx-cmk32gx4m2e3200c16w-32gb-2x16gb-ddr4-3200mhz-cl16-disipador-blanco-intel-xmp-7a10c2bc-da16-4bc2-8efb-b15cc2a93745.webp", description: "DDR4 de mayor frecuencia.", type: "memory", memoryType: "DDR4", speedMhz: 4000, capacityGb: 32, modules: 2 },

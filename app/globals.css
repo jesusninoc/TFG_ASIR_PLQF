@@ -1,23 +1,33 @@
 @import "tailwindcss";
 
 :root {
-  /* Core palette — polar / openai inspired: white base */
-  --bg-base: #FFFFFF;
-  --bg-card: #FFFFFF;
-  --bg-subtle: #F7F7F8;
-  --bg-sidebar: #F4F4F5;
+  /* Polar-inspired system from DESIGN.md */
+  --bg-base: #ffffff;
+  --bg-card: #ffffff;
+  --bg-subtle: #f7f8fb;
+  --bg-sidebar: #ffffff;
+  --bg-inverse: #000000;
 
-  --border: rgba(0, 0, 0, 0.08);
+  --border: #e5e5e5;
   --border-strong: rgba(0, 0, 0, 0.14);
 
-  --text-primary: #111110;
-  --text-secondary: #6B7280;
-  --text-tertiary: #9CA3AF;
+  --text-primary: #000000;
+  --text-secondary: #4c4f69;
+  --text-tertiary: rgba(76, 79, 105, 0.68);
 
-  --accent: #0066FF;
-  --accent-hover: #0052CC;
-  --accent-subtle: #EFF4FF;
-  --accent-subtle-hover: #DDEAFF;
+  --accent: #1e66f5;
+  --accent-hover: #174fc0;
+  --accent-subtle: #eef4ff;
+  --accent-subtle-hover: #dfeaff;
+  --secondary: #8839ef;
+  --teal: #179299;
+  --green: #40a02b;
+  --red: #e64553;
+  --amber: #df8e1d;
+
+  --radius-card: 16px;
+  --radius-pill: 33554400px;
+  --shadow-soft: 0 18px 60px rgba(30, 102, 245, 0.10), 0 8px 24px rgba(0, 0, 0, 0.06);
 
   --destructive: #DC2626;
   --destructive-subtle: #FEF2F2;
@@ -26,10 +36,10 @@
   --success-subtle: #F0FDF4;
 
   /* Legacy stripe compat */
-  --stripe-primary: #0066FF;
-  --stripe-text: #111110;
-  --stripe-border: rgba(0, 0, 0, 0.08);
-  --stripe-danger: #DC2626;
+  --stripe-primary: #1e66f5;
+  --stripe-text: #000000;
+  --stripe-border: #e5e5e5;
+  --stripe-danger: #e64553;
 
   --background: var(--bg-base);
   --foreground: var(--text-primary);
@@ -38,7 +48,7 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
+  --font-sans: var(--font-inter);
   --font-mono: var(--font-geist-mono);
 }
 
@@ -50,7 +60,7 @@ html {
 body {
   background: var(--bg-base);
   color: var(--text-primary);
-  font-family: var(--font-geist-sans), sans-serif;
+  font-family: var(--font-inter), sans-serif;
   min-height: 100vh;
 }
 
@@ -76,26 +86,31 @@ a {
   transition: color 0.15s ease, opacity 0.15s ease;
 }
 
+.design-hero {
+  background: #ffffff;
+}
+
 /* ─── Base component tokens ──────────────────────────────────── */
 @layer components {
   /* Cards / panels */
   .card {
     background: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: 12px;
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-soft);
   }
 
   .card-subtle {
     background: var(--bg-subtle);
     border: 1px solid var(--border);
-    border-radius: 12px;
+    border-radius: var(--radius-card);
   }
 
   /* Inputs */
   .input-base {
     background: var(--bg-card);
     border: 1px solid var(--border-strong);
-    border-radius: 8px;
+    border-radius: 12px;
     font-size: 0.875rem;
     color: var(--text-primary);
     transition: border-color 0.15s ease, box-shadow 0.15s ease;
@@ -104,7 +119,7 @@ a {
   .input-base:focus {
     outline: none;
     border-color: var(--text-primary);
-    box-shadow: 0 0 0 3px rgba(17, 17, 16, 0.08);
+    box-shadow: 0 0 0 3px rgba(30, 102, 245, 0.14);
   }
 
   .input-base::placeholder {
@@ -119,26 +134,28 @@ a {
 
   /* Buttons */
   .btn-primary {
-    background: var(--text-primary);
+    background: var(--accent);
     color: #fff;
-    border-radius: 8px;
+    border-radius: var(--radius-pill);
     font-size: 0.875rem;
-    font-weight: 500;
-    transition: background 0.15s ease;
+    font-weight: 600;
+    transition: background 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
     border: none;
+    box-shadow: 0 10px 24px rgba(30, 102, 245, 0.22);
   }
 
   .btn-primary:hover {
-    background: #2A2A27;
+    background: var(--accent-hover);
+    transform: translateY(-1px);
   }
 
   .btn-secondary {
     background: var(--bg-card);
     color: var(--text-primary);
-    border: 1px solid var(--border-strong);
-    border-radius: 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-pill);
     font-size: 0.875rem;
-    font-weight: 500;
+    font-weight: 600;
     transition: background 0.15s ease, border-color 0.15s ease;
   }
 
@@ -150,9 +167,9 @@ a {
   .btn-accent {
     background: var(--accent-subtle);
     color: var(--accent);
-    border-radius: 8px;
+    border-radius: var(--radius-pill);
     font-size: 0.875rem;
-    font-weight: 500;
+    font-weight: 600;
     transition: background 0.15s ease;
     border: none;
   }
@@ -163,23 +180,23 @@ a {
 
   /* Legacy stripe compat */
   .btn-stripe {
-    background: var(--text-primary);
+    background: var(--accent);
     color: #fff;
-    border-radius: 8px;
-    font-weight: 500;
+    border-radius: var(--radius-pill);
+    font-weight: 600;
     transition: background 0.15s ease;
     border: none;
   }
 
   .btn-stripe:hover {
-    background: #2A2A27;
+    background: var(--accent-hover);
   }
 
   .btn-stripe-muted {
     background: var(--accent-subtle);
     color: var(--accent);
-    border-radius: 8px;
-    font-weight: 500;
+    border-radius: var(--radius-pill);
+    font-weight: 600;
     transition: background 0.15s ease;
     border: none;
   }
@@ -193,13 +210,43 @@ a {
     background: var(--success-subtle);
     color: var(--success);
     border: 1px solid rgba(22, 163, 74, 0.2);
-    border-radius: 8px;
+    border-radius: var(--radius-pill);
   }
 
   .status-error {
     background: var(--destructive-subtle);
     color: var(--destructive);
     border: 1px solid rgba(220, 38, 38, 0.2);
-    border-radius: 8px;
+    border-radius: var(--radius-pill);
+  }
+
+  .btn-pill {
+    background: #000000;
+    color: #ffffff;
+    border-radius: var(--radius-pill);
+    border: none;
+    font-size: 0.875rem;
+    font-weight: 600;
+    transition: transform 0.15s ease, opacity 0.15s ease;
+  }
+
+  .btn-pill:hover {
+    opacity: 0.9;
+    transform: translateY(-1px);
+  }
+
+  .btn-pill-2 {
+    background: transparent;
+    color: #000000;
+    border-radius: var(--radius-pill);
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    font-size: 0.875rem;
+    font-weight: 600;
+    transition: background 0.15s ease, border-color 0.15s ease;
+  }
+
+  .btn-pill-2:hover {
+    background: var(--bg-subtle);
+    border-color: rgba(0, 0, 0, 0.12);
   }
 }

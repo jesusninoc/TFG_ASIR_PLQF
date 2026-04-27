@@ -7,6 +7,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { stripe } from "@/lib/stripe";
 import { prisma } from "@/lib/prisma";
+import { paymentIntentKey } from "@/lib/stripe-idempotency";
 
 const bodySchema = z.object({
   items: z
@@ -61,6 +62,12 @@ export async function POST(request: Request) {
       0,
     );
 
+    // Generate deterministic idempotency key based on cart contents and shipping
+    const idempotencyKey = paymentIntentKey(
+      lineItems.map((item) => ({ productId: item.productId, quantity: item.quantity })),
+      parsed.data.shippingCents
+    );
+
     const totalCents = subtotalCents + parsed.data.shippingCents;
 
     if (totalCents <= 0) {
@@ -68,13 +75,29 @@ export async function POST(request: Request) {
     }
 
     // Create PaymentIntent FIRST — if this fails, we have no orphaned DB order
-    const intent = await stripe.paymentIntents.create({
-      amount: totalCents,
-      currency: "eur",
-      automatic_payment_methods: { enabled: true },
+    const intent = await stripe.paymentIntents.create(
+      {
+        amount: totalCents,
+        currency: "eur",
+        automatic_payment_methods: { enabled: true },
+      },
+      { idempotencyKey } // ensure idempotent creation
+    );
+
+    // Check for existing order with this payment intent (idempotent response)
+    const existingOrder = await prisma.order.findFirst({
+      where: { stripePaymentIntentId: intent.id },
+      include: { items: true },
     });
 
-    // Persist order only after Stripe succeeded
+    if (existingOrder) {
+      return NextResponse.json({
+        clientSecret: intent.client_secret,
+        orderId: existingOrder.id,
+      });
+    }
+
+    // Persist order only after Stripe succeeded and no duplicate
     const order = await prisma.order.create({
       data: {
         status: "PENDING",

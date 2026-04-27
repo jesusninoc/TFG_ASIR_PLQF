@@ -1,6 +1,6 @@
 /**
  * app/page.tsx
- * Home — productos destacados desde PostgreSQL.
+ * Home - productos destacados desde PostgreSQL.
  */
 
 import React from "react";
@@ -11,78 +11,63 @@ import { formatPrice } from "@/lib/compatibility";
 import { prisma } from "@/lib/prisma";
 import { dbProductsToTypes } from "@/lib/db-to-types";
 
+export const dynamic = "force-dynamic";
+
 export default async function Home() {
   const raw = await prisma.product.findMany({
     take: 6,
     orderBy: { createdAt: "asc" },
     include: {
-      cpuSpec: true, motherboardSpec: true, memorySpec: true,
-      storageSpec: true, gpuSpec: true, psuSpec: true, caseSpec: true,
+      cpuSpec: true,
+      motherboardSpec: true,
+      memorySpec: true,
+      storageSpec: true,
+      gpuSpec: true,
+      psuSpec: true,
+      caseSpec: true,
     },
   });
   const featured = dbProductsToTypes(raw);
 
   return (
-    <main>
-      {/* ─── Hero ──────────────────────────────────────────────── */}
-      <section className="relative overflow-hidden bg-white">
-        <div
-          className="pointer-events-none absolute inset-0 opacity-[0.45]"
-          style={{
-            backgroundImage:
-              "linear-gradient(rgba(0,0,0,0.12) 1px, transparent 1px), linear-gradient(90deg, rgba(0,0,0,0.12) 1px, transparent 1px)",
-            backgroundSize: "60px 60px",
-          }}
-        />
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_90%_70%_at_50%_0%,transparent_30%,#ffffff_100%)]" />
-
-        <div className="relative mx-auto w-full max-w-6xl px-6 pb-20 pt-20 md:pt-28">
-          <div
-            className="mb-7 inline-flex items-center gap-2 rounded-full py-1 pl-2 pr-3 text-xs font-medium text-[var(--text-secondary)]"
-            style={{ border: "1px solid var(--border)", background: "var(--bg-subtle)" }}
-          >
-            <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-green-500/15 text-green-600">
-              <svg viewBox="0 0 8 8" fill="currentColor" className="h-2 w-2"><circle cx="4" cy="4" r="3" /></svg>
-            </span>
-            Catálogo actualizado · Marzo 2026
-          </div>
-
-          <h1 className="max-w-2xl text-[2.65rem] font-semibold leading-[1.08] tracking-[-0.02em] text-[var(--text-primary)] md:text-5xl">
-            El mejor hardware,<br />
-            configurado para ti.
-          </h1>
-          <p className="mt-5 max-w-md text-[1.05rem] leading-relaxed text-[var(--text-secondary)]">
-            Selecciona componentes, valida compatibilidad en tiempo real y paga en un solo flujo. Asistencia de IA incluida.
-          </p>
-          <div className="mt-8 flex flex-wrap items-center gap-3">
-            <Link href="/builder" className="btn-primary inline-flex items-center gap-2 px-5 py-2.5 text-sm">
-              Abrir PC Builder
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5"><path d="M5 12h14M12 5l7 7-7 7" /></svg>
-            </Link>
-            <Link href="/shop" className="btn-secondary inline-flex items-center gap-2 px-5 py-2.5 text-sm">
-              Ir a la tienda
-            </Link>
+    <main className="bg-white">
+      <section className="design-hero overflow-hidden px-4 pb-16 pt-12 sm:px-6 md:pb-24 md:pt-18">
+        <div className="mx-auto w-full max-w-7xl gap-12">
+          <div className="flex flex-col items-center text-center">
+            <h1 className="max-w-5xl text-[clamp(3.5rem,10vw,8rem)] font-normal leading-none text-[var(--text-primary)]">
+              Hardware que encaja contigo.
+            </h1>
+            <p className="mt-8 max-w-2xl text-xl leading-8 text-[var(--text-secondary)] md:text-2xl md:leading-10">
+              Explora componentes, valida una build completa y deja que Chipi revise tu carrito, responda dudas o prepare un PC con el presupuesto que tengas.
+            </p>
+            <div className="mt-10 flex flex-wrap items-center gap-3">
+              <Link href="/builder" className="btn-pill inline-flex min-h-11 items-center gap-2 px-5 py-3">
+                Abrir PC Builder
+                <ArrowIcon />
+              </Link>
+              <Link href="/shop" className="btn-pill-2 inline-flex min-h-11 items-center gap-2 px-5 py-3">
+                Ver catálogo
+              </Link>
+            </div>
           </div>
         </div>
       </section>
 
-      {/* ─── Featured products ─────────────────────────────────── */}
-      <section className="mx-auto w-full max-w-6xl px-6 pt-14 pb-16">
-        <div className="mb-8 flex items-end justify-between">
+      <section className="mx-auto w-full max-w-7xl px-4 py-16 sm:px-6 md:py-20">
+        <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div>
-            <p className="mb-1 text-xs font-semibold uppercase tracking-widest text-[var(--text-tertiary)]">Destacados</p>
-            <h2 className="text-xl font-semibold text-[var(--text-primary)]">Hardware para builds actuales</h2>
+            <p className="text-sm font-semibold text-[var(--accent)]">Destacados</p>
+            <h2 className="mt-2 text-4xl font-normal leading-tight text-[var(--text-primary)] md:text-5xl">
+              Componentes para builds actuales.
+            </h2>
           </div>
-          <Link href="/shop" className="text-sm text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]">
-            Ver todo &rarr;
+          <Link href="/shop" className="btn-pill-2 inline-flex min-h-11 w-fit items-center px-5 py-3">
+            Ver todo
           </Link>
         </div>
 
-        <div
-          className="grid-mesh grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3"
-          style={{ borderRadius: "12px", overflow: "hidden", border: "1px solid var(--border)" }}
-        >
-          {featured.map((product) => (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 border-t border-l">
+           {featured.map((product) => (
             <article key={product.id} className="grid-mesh-item group flex flex-col bg-white transition-colors hover:bg-[var(--bg-subtle)]">
               <Link href={`/product/${product.slug}`} className="block h-44 overflow-hidden" style={{ borderBottom: "1px solid var(--border)" }}>
                 <Image
@@ -117,12 +102,11 @@ export default async function Home() {
         </div>
       </section>
 
-      {/* ─── Category quick-links ──────────────────────────────── */}
-      <section className="mx-auto w-full max-w-6xl px-6 py-14" style={{ borderTop: "1px solid var(--border)" }}>
+      <section className="mx-auto w-full max-w-7xl px-6 py-14" style={{ borderTop: "1px solid var(--border)" }}>
         <div className="mb-8 flex items-end justify-between">
           <div>
-            <p className="mb-1 text-xs font-semibold uppercase tracking-widest text-[var(--text-tertiary)]">Explorar</p>
-            <h2 className="text-xl font-semibold text-[var(--text-primary)]">Navega por categoría</h2>
+            <p className="text-sm font-semibold text-[var(--accent)]">Explorar</p>
+            <h2 className="mt-2 text-4xl font-normal leading-tight text-[var(--text-primary)] md:text-5xl">Navega por categoría</h2>
           </div>
           <Link href="/shop" className="text-sm text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]">
             Ver todo &rarr;
@@ -160,5 +144,14 @@ export default async function Home() {
         </div>
       </section>
     </main>
+  );
+}
+
+function ArrowIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+      <path d="M5 12h14" />
+      <path d="m12 5 7 7-7 7" />
+    </svg>
   );
 }

@@ -21,11 +21,18 @@ import type {
   CaseProduct,
 } from "@/lib/types";
 
+export const dynamic = "force-dynamic";
+
 // ─── Static params para build estático ───────────────────────────────────────
 
 export async function generateStaticParams() {
-  const products = await prisma.product.findMany({ select: { slug: true } });
-  return products.map((p) => ({ slug: p.slug }));
+  try {
+    const products = await prisma.product.findMany({ select: { slug: true } });
+    return products.map((p) => ({ slug: p.slug }));
+  } catch (error) {
+    console.warn("[product] Skipping static params; database unavailable at build time.", error);
+    return [];
+  }
 }
 
 // ─── Spec table helper ────────────────────────────────────────────────────────

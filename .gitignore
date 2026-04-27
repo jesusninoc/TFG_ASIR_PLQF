@@ -42,3 +42,12 @@ next-env.d.ts
 
 
 .agents
+.claude
+
+CLAUDE.md
+.openclaude-profile.json
+.worktrees/
+
+.codex
+
+docs/superpowers/

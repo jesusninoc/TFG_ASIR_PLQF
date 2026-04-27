@@ -10,6 +10,8 @@ import { formatPrice } from "@/lib/compatibility";
 import { prisma } from "@/lib/prisma";
 import { dbProductsToTypes } from "@/lib/db-to-types";
 
+export const dynamic = "force-dynamic";
+
 interface ShopSearchParams {
   q?: string;
   type?: string;

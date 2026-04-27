@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import {
   Dialog,
@@ -10,14 +10,27 @@ import {
   DialogPanel,
   DialogTitle,
 } from "@headlessui/react";
-import { XMarkIcon, ShoppingBagIcon } from "@heroicons/react/24/outline";
+import { XMarkIcon } from "@heroicons/react/24/outline";
+import { Brain, ShoppingCart } from "lucide-react";
 import { useStore } from "@/components/store-provider";
 import { formatPrice } from "@/lib/compatibility";
+import { TOGGLE_AI_ASSISTANT_EVENT, TOGGLE_CART_EVENT } from "@/lib/assistant/assistant-events";
 
 export function SiteHeader() {
   const { items, itemCount, removeFromCart, totalCents } = useStore();
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
+
+  // Listen for cart toggle event
+  useEffect(() => {
+    const handleToggleCart = () => {
+      setOpen((prev) => !prev);
+    };
+    window.addEventListener(TOGGLE_CART_EVENT, handleToggleCart);
+    return () => {
+      window.removeEventListener(TOGGLE_CART_EVENT, handleToggleCart);
+    };
+  }, []);
 
   const navLinks = [
     { href: "/", label: "Inicio" },
@@ -25,50 +38,63 @@ export function SiteHeader() {
     { href: "/builder", label: "Builder" },
   ];
 
+  const toggleAiAssistant = () => {
+    window.dispatchEvent(new Event(TOGGLE_AI_ASSISTANT_EVENT));
+  };
+
   return (
     <>
-      <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md" style={{ borderBottom: "1px solid var(--border)" }}>
-        <div className="mx-auto flex w-full max-w-7xl items-center justify-between px-6 py-3">
-          <Link href="/" className="flex items-center gap-2">
-            <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-[var(--text-primary)] text-white text-xs font-bold select-none">P</span>
-            <span className="text-sm font-semibold text-[var(--text-primary)] tracking-tight">PC Store</span>
+      <header className="sticky top-0 z-40 bg-white/90 backdrop-blur-xl">
+        <div className="mx-auto flex min-h-16 w-full max-w-7xl items-center justify-between gap-4 px-4 sm:px-6">
+          <Link href="/" className="flex min-h-11 items-center gap-2 rounded-full pr-2">
+            <img src="/logo.png" alt="Logo" className="h-24" />
           </Link>
 
-          <nav className="flex items-center gap-5">
+          <nav className="hidden items-center p-1 sm:flex">
             {navLinks.map((link) => {
               const active = pathname === link.href || (link.href !== "/" && pathname.startsWith(link.href));
               return (
                 <Link
                   key={link.href}
                   href={link.href}
-                  className={`relative text-sm transition-colors ${
+                  className={`rounded-full px-4 py-2 text-sm transition-colors ${
                     active
-                      ? "font-medium text-[var(--text-primary)]"
-                      : "font-normal text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                      ? " font-semibold"
+                      : "font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
                   }`}
                 >
                   {link.label}
-                  {active && (
-                    <span className="absolute -bottom-[13px] left-0 right-0 h-px bg-[var(--text-primary)]" />
-                  )}
                 </Link>
               );
             })}
           </nav>
 
-          <button
-            onClick={() => setOpen(true)}
-            type="button"
-            className="flex items-center gap-1.5 rounded-md border border-[var(--border-strong)] bg-white px-3 py-1.5 text-sm font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-subtle)]"
-          >
-            <ShoppingBagIcon className="h-4 w-4 text-[var(--text-secondary)]" />
-            <span>Carrito</span>
-            {itemCount > 0 && (
-              <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--text-primary)] px-1 text-[10px] font-semibold text-white">
-                {itemCount}
-              </span>
-            )}
-          </button>
+          <div className="flex items-center gap-2">
+
+            <button
+              onClick={() => setOpen(true)}
+              type="button"
+              className="relative inline-flex h-11 w-11 items-center justify-center rounded-full bg-white text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-subtle)]"
+              aria-label={`Abrir carrito${itemCount > 0 ? `, ${itemCount} artículos` : ""}`}
+              title="Carrito"
+            >
+              <ShoppingCart className="h-5 w-5" strokeWidth={1.9} />
+              {itemCount > 0 && (
+                <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--accent)] px-1.5 text-[10px] font-semibold text-white">
+                  {itemCount}
+                </span>
+              )}
+            </button>
+            <button
+              onClick={toggleAiAssistant}
+              type="button"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-white text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-subtle)]"
+              aria-label="Abrir o cerrar asistente de IA"
+              title="Asistente de IA"
+            >
+              <Brain className="h-5 w-5" strokeWidth={1.9} />
+            </button>
+          </div>
         </div>
       </header>
 
@@ -88,13 +114,13 @@ export function SiteHeader() {
                 <div className="flex h-full flex-col bg-[var(--bg-base)]" style={{ borderLeft: "1px solid var(--border)" }}>
                   {/* Header */}
                   <div className="flex items-center justify-between bg-[var(--bg-card)] px-5 py-4" style={{ borderBottom: "1px solid var(--border)" }}>
-                    <DialogTitle className="text-sm font-semibold text-[var(--text-primary)]">
+                    <DialogTitle className="text-lg font-semibold text-[var(--text-primary)]">
                       Carrito · {itemCount} {itemCount === 1 ? "artículo" : "artículos"}
                     </DialogTitle>
                     <button
                       type="button"
                       onClick={() => setOpen(false)}
-                      className="rounded-md p-1 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-subtle)] hover:text-[var(--text-primary)]"
+                      className="rounded-full p-2 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-subtle)] hover:text-[var(--text-primary)]"
                     >
                       <XMarkIcon className="h-5 w-5" />
                     </button>
@@ -104,14 +130,14 @@ export function SiteHeader() {
                   <div className="flex-1 overflow-y-auto px-4 py-4">
                     {items.length === 0 ? (
                       <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
-                        <ShoppingBagIcon className="h-10 w-10 text-[var(--text-tertiary)]" />
+                        <ShoppingCart className="h-10 w-10 text-[var(--text-tertiary)]" strokeWidth={1.6} />
                         <p className="text-sm text-[var(--text-secondary)]">El carrito está vacío.</p>
                       </div>
                     ) : (
                       <ul className="space-y-2">
                         {items.map((item) => (
-                          <li key={item.product.id} className="flex items-start gap-3 rounded-xl bg-[var(--bg-card)] p-3" style={{ border: "1px solid var(--border)" }}>
-                            <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-[var(--bg-subtle)]">
+                          <li key={item.product.id} className="flex items-start gap-3 bg-[var(--bg-card)] p-3 border-b">
+                            <div className="h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-[var(--bg-subtle)]">
                               <Image
                                 alt={item.product.name}
                                 src={item.product.image}
@@ -158,7 +184,7 @@ export function SiteHeader() {
                       <Link
                         href="/checkout"
                         onClick={() => setOpen(false)}
-                        className="btn-stripe flex w-full items-center justify-center px-4 py-2.5 text-sm"
+                        className="btn-stripe flex min-h-11 w-full items-center justify-center px-4 py-2.5 text-sm"
                       >
                         Ir al checkout
                       </Link>

@@ -1,41 +1,307 @@
 "use client";
 
-import { FormEvent, useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { FormEvent, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, usePathname, useParams } from "next/navigation";
+import { useStore } from "./store-provider";
+import { normalizeBuildIds, normalizeSelectionIds, AI_BUILDER_LOAD_EVENT, AI_SUGGESTED_FULL_BUILD_KEY, AI_SUGGESTED_PARTIAL_SELECTION_KEY } from "@/lib/builder-transfer";
+import { BuildCard } from "./build-card";
+import { ComponentCard } from "./component-card";
+import { sanitizeMarkdown } from "@/lib/sanitizer";
+import { TOGGLE_AI_ASSISTANT_EVENT } from "@/lib/assistant/assistant-events";
+import { getAssistantLoadingMessages } from "@/lib/assistant/loading-messages";
+import type { AgentResponse, BuildIds, BuildMessage, ComponentRecommendation, PartialSelection } from "@/lib/types";
+import { Bot } from "lucide-react";
+import { DotsSpinner } from "./dots";
 
-type BuildIds = Record<string, string>;
-
-interface Message {
+type Message = {
   role: "user" | "assistant";
   content: string;
-  buildIds?: BuildIds;
-  buildTier?: string;
-}
+  build?: BuildMessage;
+  components?: ComponentRecommendation[];
+};
 
 const INITIAL_MESSAGE: Message = {
   role: "assistant",
-  content: "¡Hola! Soy Chipi, el asistente de hardware de la tienda. Cuéntame qué tipo de PC necesitas y con qué presupuesto, y te monto las mejores opciones con el stock actual. 🖥️",
+  content: "¡Hola! Soy Chipi, tu guía de hardware en la tienda. Puedo ayudarte con lo que estás viendo, revisar tu carrito, resolver dudas frecuentes o montar una configuración con el stock actual.",
 };
+
+const ASSISTANT_MESSAGES_STORAGE_KEY = "pc_selector_ai_assistant_messages";
+const ASSISTANT_OPEN_STORAGE_KEY = "pc_selector_ai_assistant_open";
+const MAX_PERSISTED_MESSAGES = 50;
+
+function isMessage(value: unknown): value is Message {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const message = value as Partial<Message>;
+  return (
+    (message.role === "user" || message.role === "assistant") &&
+    typeof message.content === "string"
+  );
+}
+
+function loadPersistedMessages(): Message[] {
+  if (typeof window === "undefined") {
+    return [INITIAL_MESSAGE];
+  }
+
+  const raw = sessionStorage.getItem(ASSISTANT_MESSAGES_STORAGE_KEY);
+  if (!raw) {
+    return [INITIAL_MESSAGE];
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      sessionStorage.removeItem(ASSISTANT_MESSAGES_STORAGE_KEY);
+      return [INITIAL_MESSAGE];
+    }
+
+    const messages = parsed.filter(isMessage).slice(-MAX_PERSISTED_MESSAGES);
+    return messages.length > 0 ? messages : [INITIAL_MESSAGE];
+  } catch {
+    sessionStorage.removeItem(ASSISTANT_MESSAGES_STORAGE_KEY);
+    return [INITIAL_MESSAGE];
+  }
+}
+
+function loadPersistedOpenState(): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  return sessionStorage.getItem(ASSISTANT_OPEN_STORAGE_KEY) === "true";
+}
+
+function extractFirstJsonObject(text: string): string | null {
+  let start = -1;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = 0; index < text.length; index++) {
+    const char = text[index];
+
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+
+    if (char === "\\") {
+      escaped = true;
+      continue;
+    }
+
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+
+    if (inString) {
+      continue;
+    }
+
+    if (char === "{") {
+      if (depth === 0) {
+        start = index;
+      }
+      depth++;
+      continue;
+    }
+
+    if (char === "}") {
+      if (depth === 0) {
+        continue;
+      }
+
+      depth--;
+      if (depth === 0 && start !== -1) {
+        return text.slice(start, index + 1);
+      }
+    }
+  }
+
+  return null;
+}
+
+function tryParseAgentResponse(text?: string): AgentResponse | null {
+  if (!text) {
+    return null;
+  }
+
+  const trimmed = text.trim();
+  const candidates = [
+    trimmed,
+    trimmed.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim(),
+  ];
+
+  const embeddedJson = extractFirstJsonObject(trimmed);
+  if (embeddedJson) {
+    candidates.push(embeddedJson);
+  }
+
+  for (const candidate of candidates) {
+    if (!candidate) {
+      continue;
+    }
+
+    try {
+      let parsed: unknown = JSON.parse(candidate);
+
+      if (typeof parsed === "string") {
+        parsed = JSON.parse(parsed);
+      }
+
+      if (!parsed || typeof parsed !== "object") {
+        continue;
+      }
+
+      const possibleResponse = parsed as AgentResponse;
+      if (possibleResponse.answer || possibleResponse.builds || possibleResponse.components) {
+        return possibleResponse;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
+}
+
+function normalizeBuildMessage(build: BuildMessage): BuildMessage {
+  return {
+    ...build,
+    buildIds: normalizeBuildIds(build.buildIds) ?? {},
+    componentRecommendations: Array.isArray(build.componentRecommendations) ? build.componentRecommendations : [],
+  };
+}
+
+function normalizeAgentResponse(payload: AgentResponse): AgentResponse {
+  const parsedFromAnswer = (!payload.builds?.length && !payload.components?.length)
+    ? tryParseAgentResponse(payload.answer)
+    : null;
+  const resolved = parsedFromAnswer ?? payload;
+
+  if (parsedFromAnswer?.builds?.length) {
+    console.warn("[ai-assistant] rescued structured build payload from answer text", {
+      builds: parsedFromAnswer.builds.length,
+    });
+  }
+
+  return {
+    ...payload,
+    ...resolved,
+    answer: resolved.answer?.trim() || resolved.clarifyQuestion || payload.answer?.trim() || payload.clarifyQuestion || "",
+    references: Array.isArray(resolved.references) ? resolved.references : [],
+    components: Array.isArray(resolved.components) ? resolved.components : undefined,
+    builds: Array.isArray(resolved.builds) ? resolved.builds.map(normalizeBuildMessage) : undefined,
+    builderPayload: resolved.builderPayload
+      ? {
+          fullBuildIds: normalizeBuildIds(resolved.builderPayload.fullBuildIds),
+          partialSelection: normalizeSelectionIds(resolved.builderPayload.partialSelection),
+        }
+      : undefined,
+  };
+}
+
+function buildResultIntro(builds: BuildMessage[]): string {
+  const count = builds.length;
+  return count === 1
+    ? "He preparado esta configuración compatible. Te dejo los componentes en la tarjeta."
+    : `He preparado ${count} configuraciones compatibles. Te dejo los componentes en cada tarjeta.`;
+}
+
+const MarkdownMessage = memo(function MarkdownMessage({ content }: { content: string }) {
+  const sanitizedHtml = useMemo(() => sanitizeMarkdown(content), [content]);
+  return <div dangerouslySetInnerHTML={{ __html: sanitizedHtml }} />;
+});
 
 export function AiAssistant() {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
-  const [messages, setMessages] = useState<Message[]>([INITIAL_MESSAGE]);
+  const pathname = usePathname();
+  const params = useParams();
+  const { items: cartItems, addRecommendationToCart } = useStore();
+  const [open, setOpen] = useState(loadPersistedOpenState);
+  const [messages, setMessages] = useState<Message[]>(loadPersistedMessages);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [loadingMessages, setLoadingMessages] = useState(() => getAssistantLoadingMessages(""));
+  const [loadingMessageIndex, setLoadingMessageIndex] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const loadInBuilder = (buildIds: BuildIds) => {
-    localStorage.setItem("ai_suggested_build", JSON.stringify(buildIds));
-    setOpen(false);
-    router.push("/builder");
-  };
+  useEffect(() => {
+    sessionStorage.setItem(
+      ASSISTANT_MESSAGES_STORAGE_KEY,
+      JSON.stringify(messages.slice(-MAX_PERSISTED_MESSAGES)),
+    );
+  }, [messages]);
+
+  useEffect(() => {
+    sessionStorage.setItem(ASSISTANT_OPEN_STORAGE_KEY, String(open));
+  }, [open]);
+
+  // Ajustar padding del body cuando el sidebar está expandido (desktop)
+  useEffect(() => {
+    const updateBodyPadding = () => {
+      if (typeof window === "undefined") return;
+      if (open && window.innerWidth >= 768) {
+        document.body.style.paddingRight = "400px";
+        document.body.style.transition = "padding-right 0.3s ease";
+      } else {
+        document.body.style.paddingRight = "";
+        document.body.style.transition = "";
+      }
+    };
+
+    updateBodyPadding();
+    window.addEventListener("resize", updateBodyPadding);
+    return () => window.removeEventListener("resize", updateBodyPadding);
+  }, [open]);
 
   useEffect(() => {
     if (open) {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }
   }, [messages, open]);
+
+  useEffect(() => {
+    const handleToggle = () => {
+      setOpen((value) => !value);
+    };
+
+    window.addEventListener(TOGGLE_AI_ASSISTANT_EVENT, handleToggle);
+    return () => window.removeEventListener(TOGGLE_AI_ASSISTANT_EVENT, handleToggle);
+  }, []);
+
+  useEffect(() => {
+    if (!loading) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      setLoadingMessageIndex((index) => (index + 1) % loadingMessages.length);
+    }, 3300);
+
+    return () => window.clearInterval(interval);
+  }, [loading, loadingMessages.length]);
+
+  const loadInBuilder = useCallback((buildIds?: BuildIds, partialSelection?: PartialSelection) => {
+    const normalizedBuildIds = normalizeBuildIds(buildIds);
+    const normalizedPartialSelection = normalizeSelectionIds(partialSelection);
+
+    if (normalizedBuildIds) {
+      localStorage.setItem(AI_SUGGESTED_FULL_BUILD_KEY, JSON.stringify(normalizedBuildIds));
+      localStorage.removeItem(AI_SUGGESTED_PARTIAL_SELECTION_KEY);
+    } else if (normalizedPartialSelection) {
+      localStorage.setItem(AI_SUGGESTED_PARTIAL_SELECTION_KEY, JSON.stringify(normalizedPartialSelection));
+      localStorage.removeItem(AI_SUGGESTED_FULL_BUILD_KEY);
+    }
+
+    window.dispatchEvent(new Event(AI_BUILDER_LOAD_EVENT));
+    setOpen(false);
+    router.push("/builder");
+  }, [router]);
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -44,17 +310,23 @@ export function AiAssistant() {
 
     setInput("");
     setMessages((current) => [...current, { role: "user", content: question }]);
+    setLoadingMessages(getAssistantLoadingMessages(question));
+    setLoadingMessageIndex(0);
     setLoading(true);
 
     try {
-      // Build conversation history to send to the API.
-      // - Build messages (multi-line component lists) are summarised so the LLM
-      //   sees clean context instead of truncated lists that lose the budget info.
-      // - Regular messages are capped at 500 chars (generous but not infinite).
       const history = messages.map((m) => {
-        if (m.role === "assistant" && m.buildIds) {
-          const tier = m.buildTier ? `tier ${m.buildTier}` : "build generada";
-          return { role: m.role as "user" | "assistant", content: `[${tier}]` };
+        if (m.role === "assistant" && m.build) {
+          return {
+            role: m.role as "user" | "assistant",
+            content: `[build ${m.build.tier}] ${m.build.answer}`.slice(0, 500),
+          };
+        }
+        if (m.role === "assistant" && m.components?.length && !m.content) {
+          return {
+            role: m.role as "user" | "assistant",
+            content: `[${m.components.length} componentes recomendados]`,
+          };
         }
         return {
           role: m.role as "user" | "assistant",
@@ -62,252 +334,225 @@ export function AiAssistant() {
         };
       });
 
+      const context = {
+        currentPage: pathname,
+        currentProductId: params?.slug as string | undefined,
+        cart: cartItems.map(item => ({
+          productId: item.product.id,
+          quantity: item.quantity,
+          priceCents: item.product.priceCents,
+          name: item.product.name,
+          type: item.product.type,
+        })),
+      };
+
       const response = await fetch("/api/assistant", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question, messages: history }),
+        body: JSON.stringify({ question, history, context }),
       });
 
       if (!response.ok) {
         throw new Error(`Error del servidor (${response.status})`);
       }
 
-      const payload = await response.json();
+      const payload = normalizeAgentResponse(await response.json() as AgentResponse);
+
+      // Manejar navegación automática sugerida por la IA
+      if (payload.navigation) {
+        const { path, buildIds } = payload.navigation;
+        if (buildIds) {
+          localStorage.setItem(AI_SUGGESTED_FULL_BUILD_KEY, JSON.stringify(buildIds));
+          localStorage.removeItem(AI_SUGGESTED_PARTIAL_SELECTION_KEY);
+        }
+        router.push(path);
+        setOpen(false);
+        return;
+      }
+
       const newMessages: Message[] = [];
 
       if (payload.builds && payload.builds.length > 0) {
-        // Intro message
+        newMessages.push({ role: "assistant", content: buildResultIntro(payload.builds) });
+        for (const build of payload.builds) {
+          newMessages.push({ role: "assistant", content: "", build });
+        }
+      } else if (payload.components && payload.components.length > 0) {
         if (payload.answer) {
           newMessages.push({ role: "assistant", content: payload.answer });
         }
-        // One message per build with its own button
-        for (const build of payload.builds) {
-          newMessages.push({
-            role: "assistant",
-            content: build.answer,
-            buildIds: build.buildIds,
-            buildTier: build.tier,
-          });
-        }
+        newMessages.push({ role: "assistant", content: "", components: payload.components });
       } else {
-        newMessages.push({
-          role: "assistant",
-          content: payload.answer ?? "No pude responder ahora.",
-        });
+        const answer = payload.answer || payload.clarifyQuestion;
+        if (!answer?.trim()) {
+          console.warn("[ai-assistant] Empty answer received, using default. Payload:", payload);
+        }
+        newMessages.push({ role: "assistant", content: answer || "No pude responder ahora." });
       }
 
       setMessages((current) => [...current, ...newMessages]);
     } catch (err) {
       console.error("[ai-assistant] fetch error:", err);
-      setMessages((current) => [
-        ...current,
-        { role: "assistant", content: "Lo siento, no puedo responder en este momento. Inténtalo de nuevo." },
-      ]);
+      setMessages((current) => [...current, { role: "assistant", content: "Lo siento, no puedo responder en este momento. Inténtalo de nuevo." }]);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleClear = () => {
+  const handleClear = useCallback(() => {
+    sessionStorage.removeItem(ASSISTANT_MESSAGES_STORAGE_KEY);
     setMessages([INITIAL_MESSAGE]);
     setInput("");
-  };
+  }, []);
 
-  return (
-    <>
-      {/* Floating orb button */}
-      <style>{`
-        /* IDLE: vagabundeo curioso, rotaciones errantes */
-        @keyframes orb-idle-move {
-          0%   { transform: translate(0px,   0px)  rotate(0deg)   scale(1);    }
-          6%   { transform: translate(2px,  -5px)  rotate(34deg)  scale(1.03); }
-          13%  { transform: translate(-2px, -3px)  rotate(18deg)  scale(1.01); }
-          21%  { transform: translate(-4px, -8px)  rotate(-20deg) scale(0.97); }
-          29%  { transform: translate(1px,  -2px)  rotate(-44deg) scale(1.02); }
-          37%  { transform: translate(3px,  -9px)  rotate(-12deg) scale(1.05); }
-          45%  { transform: translate(-2px, -4px)  rotate(58deg)  scale(0.98); }
-          52%  { transform: translate(0px,  -7px)  rotate(74deg)  scale(1.04); }
-          60%  { transform: translate(-3px, -2px)  rotate(28deg)  scale(1.01); }
-          68%  { transform: translate(2px, -10px)  rotate(-26deg) scale(0.96); }
-          75%  { transform: translate(-1px, -5px)  rotate(-52deg) scale(1.03); }
-          83%  { transform: translate(3px,  -3px)  rotate(14deg)  scale(1.0);  }
-          91%  { transform: translate(-2px, -6px)  rotate(-6deg)  scale(1.02); }
-          100% { transform: translate(0px,   0px)  rotate(0deg)   scale(1);    }
-        }
-        @keyframes orb-idle-glow {
-          0%   { box-shadow: 0 4px 18px rgba(90,60,200,0.28), 0 0 0 0   rgba(130,80,230,0.0);  }
-          30%  { box-shadow: 0 6px 28px rgba(60,80,220,0.46), 0 0 0 7px rgba(100,60,240,0.06); }
-          55%  { box-shadow: 0 3px 14px rgba(110,50,180,0.22), 0 0 0 0  rgba(130,80,230,0.0);  }
-          80%  { box-shadow: 0 8px 36px rgba(70,90,210,0.52), 0 0 0 9px rgba(90,70,255,0.05);  }
-          100% { box-shadow: 0 4px 18px rgba(90,60,200,0.28), 0 0 0 0   rgba(130,80,230,0.0);  }
-        }
-
-        /* OPEN: respira despacio, quieto, atento — leve pulso de escala */
-        @keyframes orb-open-breathe {
-          0%   { transform: translate(0px, 0px) rotate(0deg)  scale(1);    }
-          18%  { transform: translate(0px,-1px) rotate(4deg)  scale(1.06); }
-          36%  { transform: translate(0px, 0px) rotate(0deg)  scale(1.02); }
-          54%  { transform: translate(0px,-1px) rotate(-4deg) scale(1.07); }
-          72%  { transform: translate(0px, 0px) rotate(0deg)  scale(1.01); }
-          90%  { transform: translate(0px,-1px) rotate(3deg)  scale(1.05); }
-          100% { transform: translate(0px, 0px) rotate(0deg)  scale(1);    }
-        }
-        @keyframes orb-open-glow {
-          0%   { box-shadow: 0 0 14px 2px rgba(100,80,240,0.30), 0 0 0 0   rgba(120,100,255,0.0);  }
-          40%  { box-shadow: 0 0 28px 6px rgba(80,100,255,0.55), 0 0 0 12px rgba(120,100,255,0.10); }
-          100% { box-shadow: 0 0 14px 2px rgba(100,80,240,0.30), 0 0 0 0   rgba(120,100,255,0.0);  }
-        }
-
-        .orb-btn-idle {
-          animation: orb-idle-move 24s cubic-bezier(0.45,0.05,0.55,0.95) infinite,
-                     orb-idle-glow 11s ease-in-out infinite;
-          transition: box-shadow 0.6s ease, border-color 0.6s ease;
-        }
-        .orb-btn-open {
-          animation: orb-open-breathe 4s ease-in-out infinite,
-                     orb-open-glow   4s ease-in-out infinite;
-          border-color: rgba(160,120,255,0.55) !important;
-          transition: box-shadow 0.6s ease, border-color 0.6s ease;
-        }
-        .orb-btn-idle:hover,
-        .orb-btn-open:hover {
-          animation-play-state: paused;
-          filter: brightness(1.08);
-        }
-      `}</style>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-label="Abrir asistente AI"
-        className={`fixed bottom-5 right-5 z-50 overflow-hidden rounded-full active:scale-95 ${open ? "orb-btn-open" : "orb-btn-idle"}`}
-        style={{
-          height: 56,
-          width: 56,
-          backgroundImage: "url('/orb-3.webp')",
-          backgroundSize: "cover",
-          backgroundPosition: "center",
-          border: "2px solid rgba(255,255,255,0.25)",
-        }}
-      />
-
-
-      {/* Chat panel */}
-      {open && (
-        <div
-          className="fixed bottom-[74px] right-5 z-50 flex flex-col overflow-hidden rounded-2xl bg-[var(--bg-card)] shadow-[0_12px_40px_rgba(0,0,0,0.14)]"
-          style={{ border: "1px solid var(--border)", width: 380, maxHeight: 540 }}
-        >
-          {/* Header */}
-          <div
-            className="flex items-center justify-between px-4 py-3"
-            style={{ borderBottom: "1px solid var(--border)" }}
-          >
-            <div className="flex items-center gap-2.5">
-              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--text-primary)]">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
-                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                </svg>
-              </div>
-              <div>
-                <p className="text-sm font-semibold leading-tight text-[var(--text-primary)]">Asistente AI</p>
-                <p className="text-[11px] leading-tight text-[var(--text-tertiary)]">Hardware &amp; compatibilidad</p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-1">
-              {/* Clear conversation */}
-              <button
-                type="button"
-                onClick={handleClear}
-                title="Nueva conversación"
-                className="rounded-md p-1.5 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-subtle)] hover:text-[var(--text-secondary)]"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
-                  <polyline points="3 6 5 6 21 6" />
-                  <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                  <path d="M10 11v6M14 11v6" />
-                  <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
-                </svg>
-              </button>
-              {/* Close */}
-              <button
-                type="button"
-                onClick={() => setOpen(false)}
-                className="rounded-md p-1.5 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-subtle)] hover:text-[var(--text-primary)]"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              </button>
-            </div>
+  // Helper: renderizar cabecera del sidebar
+  const renderHeader = () => (
+    <div className="flex flex-col gap-2 px-4 py-3 border-b border-gray-200">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Bot className="h-5 w-5 text-gray-500" />
+          <div>
+            <p className="text-sm font-semibold text-gray-900 leading-tight">Chipi</p>
+            <p className="text-xs text-gray-500 leading-tight">Hardware &amp; compatibilidad</p>
           </div>
-
-          {/* Messages */}
-          <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4" style={{ minHeight: 320, maxHeight: 360 }}>
-            {messages.map((message, index) => (
-              <div
-                key={`${message.role}-${index}`}
-                className={`max-w-[88%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed ${
-                  message.role === "assistant"
-                    ? "rounded-tl-sm bg-[var(--bg-subtle)] text-[var(--text-primary)]"
-                    : "ml-auto rounded-tr-sm bg-[var(--text-primary)] text-white"
-                }`}
-              >
-                <span style={{ whiteSpace: "pre-line" }}>{message.content}</span>
-                {message.buildIds && (
-                  <button
-                    type="button"
-                    onClick={() => loadInBuilder(message.buildIds!)}
-                    className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold text-white transition-opacity hover:opacity-90"
-                    style={{ background: "var(--accent)" }}
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
-                      <path d="M5 12h14M12 5l7 7-7 7" />
-                    </svg>
-                    Cargar esta build en el Builder
-                  </button>
-                )}
-              </div>
-            ))}
-            {loading && (
-              <div className="max-w-[88%] rounded-2xl rounded-tl-sm bg-[var(--bg-subtle)] px-3.5 py-2.5">
-                <span className="flex gap-1">
-                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-[var(--text-tertiary)]" style={{ animationDelay: "0ms" }} />
-                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-[var(--text-tertiary)]" style={{ animationDelay: "150ms" }} />
-                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-[var(--text-tertiary)]" style={{ animationDelay: "300ms" }} />
-                </span>
-              </div>
-            )}
-            <div ref={messagesEndRef} />
-          </div>
-
-          {/* Input */}
-          <form
-            onSubmit={handleSubmit}
-            className="flex items-end gap-2 px-3.5 py-3.5"
-            style={{ borderTop: "1px solid var(--border)" }}
+        </div>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={handleClear}
+            title="Nueva conversación"
+            className="rounded p-1.5 text-gray-500 hover:bg-gray-100 transition-colors"
+            aria-label="Nueva conversación"
           >
-            <input
-              value={input}
-              onChange={(event) => setInput(event.target.value)}
-              placeholder="Escribe tu pregunta..."
-              className="input-base flex-1 px-3.5 py-2.5 text-sm"
-              disabled={loading}
-            />
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+              <path d="M3 6h18" />
+              <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+              <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+            </svg>
+          </button>
+        
             <button
-              type="submit"
-              disabled={loading || !input.trim()}
-              className="btn-primary flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-opacity disabled:opacity-40"
+              type="button"
+              onClick={() => setOpen(false)}
+              className="rounded p-1.5 text-gray-500 hover:bg-gray-100 transition-colors"
+              aria-label="Cerrar asistente"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
-                <line x1="22" y1="2" x2="11" y2="13" />
-                <polygon points="22 2 15 22 11 13 2 9 22 2" />
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
               </svg>
             </button>
-          </form>
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderMessages = () => (
+    <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      {messages.map((message, index) => (
+        <div key={`${message.role}-${index}`} className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}>
+          {message.build ? (
+            <div className="w-full max-w-sm">
+              <BuildCard build={message.build} onLoad={() => loadInBuilder(message.build!.buildIds)} />
+            </div>
+          ) : message.components && message.components.length > 0 && !message.content ? (
+            <div className="grid grid-cols-1 gap-2 w-full max-w-sm">
+              {message.components.map((comp) => (
+                <ComponentCard
+                  key={comp.id}
+                  recommendation={comp}
+                  onAddToCart={addRecommendationToCart}
+                  onViewProduct={() => router.push(`/product/${comp.productLink.split('/').pop()}`)}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className={`rounded-2xl px-4 py-2.5 text-sm max-w-[88%] ${
+              message.role === "assistant"
+                ? "text-gray-900"
+                : "bg-gray-100 text-gray-900 rounded-tl-none"
+            }`}>
+              <MarkdownMessage content={message.content} />
+            </div>
+          )}
+        </div>
+      ))}
+      {loading && (
+        <div className="flex justify-start">
+          <div
+            className="max-w-[88%] px-4 py-2.5 text-sm text-gray-700"
+            role="status"
+            aria-live="polite"
+          >
+            <span className="inline-flex items-center gap-2">
+              <DotsSpinner color="#6a7282" />
+              <span>{loadingMessages[loadingMessageIndex] ?? "Preparando la respuesta..."}</span>
+            </span>
+          </div>
         </div>
       )}
+      <div ref={messagesEndRef} />
+    </div>
+  );
+
+  const renderFooter = () => (
+    <form onSubmit={handleSubmit} className="flex items-end gap-2 px-4 py-3 border-t border-gray-200">
+      <div className="flex-1 relative">
+        <textarea
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          placeholder="Escribe tu pregunta..."
+          rows={1}
+          className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
+          disabled={loading}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              handleSubmit(e);
+            }
+          }}
+        />
+      </div>
+      <button
+        type="submit"
+        disabled={loading || !input.trim()}
+        className="h-10 w-10 shrink-0 inline-flex items-center justify-center rounded-lg bg-gray-900 text-white disabled:opacity-40 hover:bg-gray-800 transition-colors"
+        aria-label="Enviar mensaje"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+          <line x1="22" y1="2" x2="11" y2="13" />
+          <polygon points="22 2 15 22 11 13 2 9 22 2" />
+        </svg>
+      </button>
+    </form>
+  );
+
+  // Si no está abierto, mostrar solo botón flotante minimalista
+  if (!open) {
+    return <></>
+  }
+
+  // Sidebar completo (desktop y mobile)
+  return (
+    <>
+      {/* Desktop Sidebar */}
+      <div className="hidden md:flex fixed right-0 top-0 bottom-0 w-[400px] bg-white border-l border-gray-200 shadow-sm z-50 flex-col">
+        {renderHeader()}
+        {renderMessages()}
+        {renderFooter()}        
+      </div>
+
+      {/* Mobile Overlay & Sidebar */}
+      <div className="md:hidden fixed inset-0 z-50">
+        {/* Backdrop */}
+        <div className="absolute inset-0 bg-black/20 backdrop-blur-sm" onClick={() => setOpen(false)} aria-hidden="true" />
+        {/* Panel */}
+        <div className="absolute right-0 top-0 bottom-0 w-full max-w-sm bg-white shadow-xl flex flex-col">
+          {renderHeader()}
+          {renderMessages()}
+          {renderFooter()}
+        </div>
+      </div>
     </>
   );
 }

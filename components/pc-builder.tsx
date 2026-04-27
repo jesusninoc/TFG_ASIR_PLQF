@@ -1,10 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
+import { AI_BUILDER_LOAD_EVENT, AI_SUGGESTED_FULL_BUILD_KEY, AI_SUGGESTED_PARTIAL_SELECTION_KEY, normalizeSelectionIds } from "@/lib/builder-transfer";
+import { TOGGLE_CART_EVENT } from "@/lib/assistant/assistant-events";
 import { evaluateBuildCompatibility, formatPrice } from "@/lib/compatibility";
 import type {
   PcBuildSelection,
+  PartialSelection,
   Product,
   CpuProduct,
   MotherboardProduct,
@@ -146,7 +149,7 @@ function StepBar({ current, selection, onGoTo }: { current: number; selection: P
 
 // ─── Product card ─────────────────────────────────────────────────────────────
 
-function ProductCard({ product, selected, incompatible, onClick }: { product: Product; selected: boolean; incompatible: boolean; onClick: () => void }) {
+const ProductCard = memo(function ProductCard({ product, selected, incompatible, onClick }: { product: Product; selected: boolean; incompatible: boolean; onClick: () => void }) {
   const specs = getSpecs(product);
   return (
     <button type="button" onClick={onClick} className={`group relative flex flex-col gap-2.5 p-3.5 text-left transition-colors ${selected ? "bg-[var(--bg-subtle)]" : incompatible ? "opacity-35 hover:opacity-60" : "bg-white hover:bg-[var(--bg-subtle)]"}`}>
@@ -165,6 +168,18 @@ function ProductCard({ product, selected, incompatible, onClick }: { product: Pr
       <p className="text-sm font-semibold text-[var(--text-primary)]">{formatPrice(product.priceCents)}</p>
     </button>
   );
+});
+
+function readStoredSelection(rawValue: string | null): PartialSelection | undefined {
+  if (!rawValue) {
+    return undefined;
+  }
+
+  try {
+    return normalizeSelectionIds(JSON.parse(rawValue) as Record<string, string>);
+  } catch {
+    return undefined;
+  }
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
@@ -197,28 +212,59 @@ export function PcBuilder() {
     loadProducts();
   }, [loadProducts]);
 
-  // Load AI-suggested build from localStorage on mount
-  useEffect(() => {
+  const applyStoredSelection = useCallback(() => {
     if (!productsByType) return;
-    const stored = localStorage.getItem("ai_suggested_build");
-    if (!stored) return;
-    try {
-      const buildIds: Record<string, string> = JSON.parse(stored);
-      localStorage.removeItem("ai_suggested_build");
-      const preselect: PcBuildSelection = {};
-      for (const [key, id] of Object.entries(buildIds)) {
-        const k = key as keyof PcBuildSelection;
-        const list = productsByType[k] as Product[];
-        const found = list?.find((p) => p.id === id);
-        if (found) (preselect as Record<string, Product>)[k] = found;
-      }
-      setSelection(preselect);
-      const firstEmpty = STEPS.findIndex((s) => !preselect[s.key]);
-      setCurrentStep(firstEmpty === -1 ? STEPS.length - 1 : firstEmpty);
-    } catch {
-      // malformed, ignore
+    const fullIds = readStoredSelection(localStorage.getItem(AI_SUGGESTED_FULL_BUILD_KEY));
+    const partialIds = readStoredSelection(localStorage.getItem(AI_SUGGESTED_PARTIAL_SELECTION_KEY));
+
+    if (!fullIds && !partialIds) {
+      return;
     }
-  }, [productsByType]);
+
+    const preselect: PcBuildSelection = fullIds ? {} : { ...selection };
+
+    for (const selectionIds of [fullIds, partialIds]) {
+      if (!selectionIds) {
+        continue;
+      }
+
+      for (const [key, id] of Object.entries(selectionIds)) {
+        const selectionKey = key as keyof PcBuildSelection;
+        const list = productsByType[selectionKey] as Product[];
+        const found = list?.find((product) => product.id === id);
+        if (found) {
+          (preselect as Record<string, Product>)[selectionKey] = found;
+        }
+      }
+    }
+
+    localStorage.removeItem(AI_SUGGESTED_FULL_BUILD_KEY);
+    localStorage.removeItem(AI_SUGGESTED_PARTIAL_SELECTION_KEY);
+
+    setSelection(preselect);
+    const firstEmpty = STEPS.findIndex((s) => !preselect[s.key]);
+    setCurrentStep(firstEmpty === -1 ? STEPS.length - 1 : firstEmpty);
+  }, [productsByType, selection]);
+
+  useEffect(() => {
+    applyStoredSelection();
+  }, [applyStoredSelection]);
+
+  useEffect(() => {
+    if (!productsByType) {
+      return;
+    }
+
+    const handleSuggestedLoad = () => {
+      applyStoredSelection();
+    };
+
+    window.addEventListener(AI_BUILDER_LOAD_EVENT, handleSuggestedLoad);
+
+    return () => {
+      window.removeEventListener(AI_BUILDER_LOAD_EVENT, handleSuggestedLoad);
+    };
+  }, [applyStoredSelection, productsByType]);
 
   const report = useMemo(() => evaluateBuildCompatibility(selection), [selection]);
 
@@ -246,6 +292,8 @@ export function PcBuilder() {
     // Remove any existing build items to prevent duplicating on repeated clicks
     selected.forEach((p) => removeFromCart(p.id));
     selected.forEach((p) => addToCart(p));
+    // Open the cart
+    window.dispatchEvent(new Event(TOGGLE_CART_EVENT));
   };
 
   if (loading) {

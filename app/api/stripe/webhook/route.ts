@@ -31,6 +31,7 @@ import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 import { constructStripeEvent, stripe } from "@/lib/stripe";
 import { prisma } from "@/lib/prisma";
+import { WebhookEventSchema } from "@/lib/validation";
 
 // Forzar runtime Node.js — necesario para leer el body crudo correctamente
 export const runtime = "nodejs";
@@ -55,6 +56,11 @@ export async function POST(req: NextRequest) {
     const message = err instanceof Error ? err.message : "Firma inválida";
     console.error("[webhook] Verificación de firma fallida:", message);
     return NextResponse.json({ error: `Firma inválida: ${message}` }, { status: 400 });
+  }
+
+  const validatedEvent = WebhookEventSchema.safeParse(event);
+  if (!validatedEvent.success) {
+    return NextResponse.json({ error: "Evento de Stripe inválido" }, { status: 400 });
   }
 
   // 3. Procesar el evento

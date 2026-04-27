@@ -4,34 +4,32 @@
 
 Cuando se diseña un sistema de recomendación de hardware con IA, la primera pregunta que surge es inevitable: **¿por qué no dejar que el LLM haga todo?**
 
-Un modelo de lenguaje grande como Mistral puede mantener conversaciones fluidas, conoce miles de componentes de PC, entiende las diferencias entre una build gaming y una workstation, habla español, y es capaz de formatear respuestas de manera legible. ¿Por qué es necesario todo ese motor determinista si el modelo podría recomendar una build directamente en su respuesta?
+Un modelo de lenguaje grande como Step-3.5-flash puede mantener conversaciones fluidas, conoce miles de componentes de PC, entiende las diferencias entre una build gaming y una workstation, habla español, y es capaz de formatear respuestas de manera legible. ¿Por qué es necesario todo ese motor determinista si el modelo podría recomendar una build directamente en su respuesta?
 
-Esta página responde a esa pregunta con detalle. La respuesta corta es: **porque los LLMs son excelentes analizando texto y terribles tomando decisiones con datos dinámicos, restricciones duras y requisitos de corrección absoluta**. La respuesta larga es todo lo que sigue.
-
----
-
-## Los dos roles del sistema
-
-El sistema tiene dos trabajos fundamentalmente distintos:
-
-| Trabajo A | Trabajo B |
-|---|---|
-| Entender lo que el usuario quiere decir | Encontrar la mejor build posible |
-| "Quiero gaming con AMD sin gastar mucho" | "Consultar stock, aplicar pesos, verificar compatibilidad" |
-| Lenguaje natural → estructura | Estructura → resultado correcto |
-| Ambiguo, contextual, subjetivo | Determinista, verificable, correcto o incorrecto |
-
-**El LLM es el experto en el Trabajo A**. El motor determinista es el experto en el Trabajo B. El sistema los conecta: el LLM hace el Trabajo A y entrega un objeto JSON tipado; el motor recoge ese JSON y ejecuta el Trabajo B.
-
-Esta separación no es arbitraria ni capricho de diseño. Es el resultado de entender en qué falla cada tecnología cuando se le pide hacer lo que no es su fortaleza.
+Esta página responde a esa pregunta con detalle. La respuesta corta es: **porque los LLMs son excelentes analizando texto y terribles tomando decisiones con datos dinámicos, restricciones duras y requisitos de corrección absoluta**. La respuesta larga explica cómo la arquitectura actual logra lo mejor de ambos mundos: **agentes especializados con tool-calling** para razonar sobre datos reales, y un **motor determinista** para las decisiones críticas.
 
 ---
 
-## Por qué los LLMs no deben tomar decisiones de negocio
+## Los tres roles del sistema
+
+El sistema actual tiene tres trabajos fundamentalmente distintos:
+
+| Trabajo A | Trabajo B | Trabajo C |
+|---|---|---|
+| Entender lo que el usuario quiere | Generar builds compatibles dentro del presupuesto | Analizar productos y responder preguntas técnicas |
+| "Quiero gaming con AMD sin gastar mucho" | "Consultar stock, aplicar pesos, verificar compatibility" | "¿La RTX 4060 es buena para 4K?" |
+| Lenguaje natural → estructura | Estructura → resultado correcto | Especificaciones técnicas → explicación clara |
+| Ambiguo, contextual, subjetivo | Determinista, verificable, correcto o incorrecto | Requiere datos reales + conocimiento del dominio |
+
+**El LLM es el experto en los Trabajos A y C**. El motor determinista es el experto en el Trabajo B. Los agentes especializados (CatalogAgent, TechnicalAgent) usan LLM con herramientas para acceder a datos reales; BuildAgent usa motor puro. El sistema los conecta: el clasificador convierte lenguaje en intención, y cada agente produce resultados confiables en su dominio.
+
+---
+
+## Por qué los LLMs no deben generar builds directamente
 
 ### 1. Los LLMs alucinan datos concretos
 
-Un modelo de lenguaje fue entrenado sobre texto extraído de internet y libros. Su conocimiento de productos de hardware es estático, incompleto, y tiene una fecha de corte. Cuando un LLM responde "te recomiendo la Ryzen 7 9800X3D por 450€", ese precio puede estar incorrecto. Ese producto puede no estar en stock. Ese producto puede no existir en la base de datos de la tienda.
+Un modelo de lengua fue entrenado sobre texto extraído de internet y libros. Su conocimiento de productos de hardware es estático, incompleto, y tiene una fecha de corte. Cuando un LLM responde "te recomiendo la Ryzen 7 9800X3D por 450€", ese precio puede estar incorrecto. Ese producto puede no estar en stock. Ese producto puede no existir en la base de datos de la tienda.
 
 En PC Selector, el stock y los precios cambian. Un componente puede agotarse entre una consulta y la siguiente. Un proveedor puede actualizar un precio. Si el LLM generara builds directamente, el sistema estaría recomendando productos ficticios con precios ficticios, posiblemente creando expectativas que el proceso de compra no podría cumplir.
 
@@ -91,25 +89,16 @@ El LLM hace esto de manera natural porque fue entrenado en millones de conversac
 
 ---
 
-## La interfaz entre las dos capas: `AssistantIntent`
+## La interfaz entre las dos capas: AssistantIntent
 
 La clave del diseño es que la comunicación entre las dos capas se realiza a través de un **tipo estrictamente definido**:
 
 ```typescript
-// Lo que el LLM produce (lib/types.ts, validado con Zod)
+// Lo que el LLM produce (lib/agent/types.ts, validado con Zod)
 interface AssistantIntent {
-  intent: "build" | "clarify" | "faq" | "unknown";
-  buildFilters?: {
-    budgetCents: number;
-    useCase?: "gaming" | "workstation_gpu" | "workstation_cpu" | "office";
-    preferBrands?: BrandFilters;
-    excludeBrands?: BrandFilters;
-    minSpecs?: MinSpecs;
-    requireDedicatedGpu?: boolean;
-    preferFormFactor?: FormFactor;
-  };
-  clarifyQuestion?: string;
-  faqQuery?: string;
+  agent: "build" | "catalog" | "faq" | "context" | "order" | "unknown";
+  confidence?: number;
+  parameters?: Record<string, any>;  // Ej: { budgetCents, useCase, productId, componentType, email }
 }
 ```
 
@@ -117,9 +106,27 @@ Este contrato tiene propiedades importantes:
 
 **Es pequeño.** El LLM solo necesita extraer un puñado de campos. No tiene que conocer el catálogo. No tiene que calcular qué componentes elegir. Solo tiene que mapear el texto del usuario a este esquema.
 
-**Es validado.** Antes de que el motor use el resultado del LLM, Zod verifica que el JSON tiene la estructura correcta, los tipos correctos y los valores dentro de los enums definidos. Si el LLM devuelve algo malformado (alucinación de estructura), la validación falla y el sistema devuelve un intent `"unknown"` en lugar de pasarle datos corruptos al motor.
+**Es validado.** Antes de que el motor use el resultado del LLM, Zod verifica que el JSON tiene la estructura correcta, los tipos correctos y los valores dentro de los enums definidos. Si el LLM devuelve algo malformado (alucinación de estructura), la validación falla y el sistema hace fallback al clasificador de reglas o devuelve `unknown`.
 
 **Es determinista desde aquí en adelante.** Una vez que el `AssistantIntent` es validado, todo lo que sigue es 100% determinista. El mismo intent con el mismo catálogo siempre produce la misma build.
+
+---
+
+## Tool-calling: cuando el LLM necesita datos reales
+
+Para preguntas técnicas (`TechnicalAgent`) o búsquedas de componentes (`CatalogAgent`), el sistema permite que el LLM **razone sobre datos reales** a través de herramientas:
+
+1. El agente recibe la pregunta y un system prompt que explica cómo usar `search_catalog`.
+2. El LLM decide cuándo llamar a la herramienta (tool-calling) con parámetros como `{ componentType: "gpu", brand: "NVIDIA" }` o `{ productId: "nvidia-rtx-4060-ti" }`.
+3. `executeSearchCatalog` consulta la base de datos y devuelve JSON con productos y especificaciones.
+4. El LLM recibe ese resultado y genera una respuesta final basada en datos reales.
+
+Esto combina lo mejor de ambos mundos:
+- El LLM no necesita memorizar precios ni stocks; los obtiene en tiempo real.
+- La respuesta se basa en datos actualizados de la BD.
+- El LLM puede hacer análisis comparativos y explicaciones técnicas.
+
+La única restricción es que **el LLM nunca toma la decisión final de qué componente recomendar en una build completa**; esa responsabilidad recae en el motor determinista (BuildAgent).
 
 ---
 
@@ -131,17 +138,17 @@ Ejemplo de conversación problemática:
 
 ```
 Turno 1 — Usuario: "quiero una PC gamer por 1500€"
-Turno 1 — LLM: [intent: "build", budgetCents: 150000, useCase: "gaming"]
+Turno 1 — LLM: { agent: "build", parameters: { budgetCents: 150000, useCase: "gaming" } }
 
 Turno 2 — Usuario: "y que sea con AMD para la CPU y GPU"
-Turno 2 — LLM: [intent: "build", budgetCents: 0, useCase: "gaming", preferBrands: {cpu: ["AMD"], gpu: ["AMD"]}]
+Turno 2 — LLM: { agent: "build", parameters: { budgetCents: 0, useCase: "gaming", preferBrands: {cpu: ["AMD"], gpu: ["AMD"] } }
                                    ^^^^^^^^^^^^
                                    Olvidó el presupuesto del turno anterior
 ```
 
-Esto ocurre con cierta frecuencia en modelos de 7B parámetros con ventanas de contexto cortas, o cuando el historial de conversación es largo. EL LLM solo ve el turno actual y extrae "AMD gaming" pero no "reitera" el presupuesto que ya sabe de antes.
+Esto ocurre con cierta frecuencia, especialmente en modelos de 7B parámetros con ventanas de contexto cortas. El LLM solo ve el turno actual y extrae "AMD gaming" pero no "reitera" el presupuesto que ya sabe de antes.
 
-El sistema tiene una red de seguridad explícita en `lib/rag.ts`: la función `extractBudgetCentsFromHistory()`. Si el motor recibe `budgetCents: 0`, el orquestador escanea todos los mensajes del usuario en el historial con expresiones regulares para recuperar el presupuesto más reciente mencionado. Esta recuperación es determinista (regex sobre texto) y no depende del LLM.
+El clasificador actual (rule-based fallback) puede incluir una red de seguridad: detectar `budgetCents: 0` y escanear el historial de texto del usuario con expresiones regulares para recuperar el presupuesto más reciente mencionado. Esta recuperación es determinista (regex sobre texto) y no depende del LLM.
 
 Esta es otra ilustración del patrón general: **las limitaciones del LLM se compensan con lógica determinista, no con un LLM más grande**.
 
@@ -175,23 +182,23 @@ El sistema convierte el catálogo de productos a embeddings, y ante cada consult
 - La ventana de contexto se llena rápidamente si hay muchos productos, degradando la atención del modelo.
 - El presupuesto sigue siendo un problema aritmético que el LLM maneja mal.
 
-### Alternativa C: El enfoque actual — LLM de intención + motor determinista
+### Alternativa C: El enfoque actual — Clasificador + Agentes especializados + Motor determinista
 
 **Ventajas**:
-- El LLM hace solo lo que hace bien: parsear lenguaje.
-- El motor hace solo lo que hace bien: aplicar restricciones con datos reales.
+- El LLM hace solo lo que hace bien: clasificar intenciones y/o analizar datos.
+- El motor hace solo lo que hace bien: generar builds con restricciones duras.
 - El resultado es reproducible, auditable y correcto.
-- La latencia del LLM es mínima porque solo necesita generar un JSON pequeño.
-- Se puede usar un modelo pequeño (Mistral 7B) con bajo coste y latencia.
+- La latencia del LLM es mínima porque solo necesita generar JSON corto o análisis puntuales.
+- Se puede usar un modelo pequeño (Step-3.5-flash o Mixtral) con bajo coste y latencia.
 - El sistema puede actualizarse sin reentrenar ningún modelo: basta con actualizar las tablas de pesos o las reglas de compatibilidad.
 
 **Desventajas**:
 - Más complejidad arquitectural.
-- El LLM puede fallar en parsear intenciones complejas (se mitiga con el schema Zod y el sistema de clarificación).
+- El clasificador LLM puede fallar en intenciones complejas (se mitiga con fallback a reglas).
 
 ---
 
-## Cuándo actualizar el motor vs. cuándo actualizar el prompt
+## Cuándo actualizar el motor vs. cuándo ajustar prompts
 
 Esta distinción es práctica e importante para el desarrollo futuro del sistema:
 
@@ -202,11 +209,11 @@ Esta distinción es práctica e importante para el desarrollo futuro del sistema
 - Se ajustan los multiplicadores de tier.
 - Se introduce un nuevo criterio de selección de componentes.
 
-**Actualiza el prompt (`intent-parser.ts`) cuando:**
+**Actualiza el prompt (clasificador o agentes) cuando:**
 - Aparece un nuevo streamer o influencer al que los usuarios referencia.
 - Se añade un nuevo caso de uso que los usuarios expresan con nuevo vocabulario.
 - El LLM falla en interpretar una forma específica de expresar el presupuesto.
-- Se añade un nuevo campo al schema `AssistantIntent`.
+- Se mejora la redacción de las instrucciones para tool-calling.
 
 **Nunca** se debe trasladar lógica de negocio al prompt para que el LLM "tome decisiones" con ella. Si la lógica puede expresarse como código, debe estar en código.
 
@@ -217,13 +224,10 @@ Esta distinción es práctica e importante para el desarrollo futuro del sistema
 Gracias a la separación LLM/motor, el sistema puede garantizar formalmente estas propiedades:
 
 1. **Corrección de presupuesto**: `totalPriceCents ≤ tierBudget ≤ 0.95 × filters.budgetCents` — verificado por aritmética, no por el LLM.
-
 2. **Corrección de stock**: todos los componentes recomendados tienen `stock > 0` en el momento de la consulta.
-
 3. **Corrección de compatibilidad**: al menos las 5 reglas técnicas verificadas por `evaluateBuildCompatibility` se cumplen en todo build devuelto.
-
 4. **Corrección de precio**: el precio mostrado al usuario es el precio de la base de datos, no el que el LLM cree que debería ser.
-
 5. **Ausencia de alucinaciones en productos**: no se puede recomendar un producto que no existe en la base de datos.
+6. **Respuestas técnicas basadas en datos reales**: `TechnicalAgent` solo analiza productos que existen en la BD, usando sus especificaciones exactas.
 
-Ninguna de estas garantías sería posible si el LLM tomara las decisiones de selección de componentes.
+Ninguna de estas garantías sería posible si el LLM tomara las decisiones de selección de componentes directamente.

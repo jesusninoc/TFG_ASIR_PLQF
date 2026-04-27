@@ -1,6 +1,6 @@
 "use client";
 
-import { CartItem, Product } from "@/lib/types";
+import { CartItem, Product, ComponentRecommendation } from "@/lib/types";
 import {
   createContext,
   PropsWithChildren,
@@ -14,6 +14,7 @@ import { z } from "zod";
 interface StoreContextValue {
   items: CartItem[];
   addToCart: (product: Product) => void;
+  addRecommendationToCart: (recommendation: ComponentRecommendation) => void;
   removeFromCart: (productId: string) => void;
   clearCart: () => void;
   itemCount: number;
@@ -41,6 +42,21 @@ const cartItemSchema = z.object({
 });
 const cartSchema = z.array(cartItemSchema).max(50);
 
+function recommendationToCartProduct(recommendation: ComponentRecommendation): Product {
+  const slug = recommendation.productLink.split("/").filter(Boolean).pop() ?? recommendation.id;
+
+  return {
+    id: recommendation.id,
+    slug,
+    name: recommendation.name,
+    brand: recommendation.brand,
+    priceCents: recommendation.priceCents,
+    image: recommendation.image,
+    description: recommendation.reasoning || `Producto recomendado de tipo ${recommendation.componentType}.`,
+    type: recommendation.componentType,
+  } as unknown as Product;
+}
+
 export function StoreProvider({ children }: PropsWithChildren) {
   const [items, setItems] = useState<CartItem[]>(() => {
     if (typeof window === "undefined") {
@@ -59,7 +75,7 @@ export function StoreProvider({ children }: PropsWithChildren) {
         window.localStorage.removeItem(STORAGE_KEY);
         return [];
       }
-      return validated.data as CartItem[];
+      return validated.data as unknown as CartItem[];
     } catch {
       window.localStorage.removeItem(STORAGE_KEY);
       return [];
@@ -86,6 +102,10 @@ export function StoreProvider({ children }: PropsWithChildren) {
       });
     };
 
+    const addRecommendationToCart = (recommendation: ComponentRecommendation) => {
+      addToCart(recommendationToCartProduct(recommendation));
+    };
+
     const removeFromCart = (productId: string) => {
       setItems((currentItems) =>
         currentItems.filter((item) => item.product.id !== productId),
@@ -103,6 +123,7 @@ export function StoreProvider({ children }: PropsWithChildren) {
     return {
       items,
       addToCart,
+      addRecommendationToCart,
       removeFromCart,
       clearCart,
       itemCount,

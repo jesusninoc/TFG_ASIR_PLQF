@@ -11,6 +11,7 @@
 import { prisma } from "@/lib/prisma";
 import { dbProductsToTypes } from "@/lib/db-to-types";
 import { evaluateBuildCompatibility } from "@/lib/compatibility";
+import { withRetry, getDefaultRetryConfig } from "@/lib/agent/retry";
 import type {
   BuildFilters,
   BuildResult,
@@ -75,111 +76,159 @@ function brandExcludeFilter(brands: string[] | undefined) {
   return brands.map((b) => ({ brand: { not: { contains: b, mode: "insensitive" as const } } }));
 }
 
+function filterLockedProducts<T extends { id: string }>(items: T[], lockedId: string | undefined): T[] {
+  if (!lockedId) return items;
+  return items.filter((item) => item.id === lockedId);
+}
+
 // ─── Main export ──────────────────────────────────────────────────────────────
 
 export async function generateBuilds(filters: BuildFilters): Promise<BuildResult[]> {
   const useCase: UseCase = filters.useCase ?? "office";
   const weights = USE_CASE_WEIGHTS[useCase];
-  const needsGpu = weights.gpu > 0 && filters.requireDedicatedGpu !== false;
+  const lockedComponents = filters.lockedComponents ?? {};
+  const needsGpu = Boolean(lockedComponents.gpu) || (weights.gpu > 0 && filters.requireDedicatedGpu !== false);
 
   const { preferBrands, excludeBrands, minSpecs } = filters;
 
   // ── Fetch all in-stock components in parallel ──────────────────────────────
   const [cpusRaw, motherboardsRaw, memoriesRaw, storagesRaw, gpusRaw, psusRaw, casesRaw] =
     await Promise.all([
-      prisma.product.findMany({
-        where: {
-          componentType: "CPU",
-          stock: { gt: 0 },
-          ...brandContainsFilter(preferBrands?.cpu),
-          AND: [
-            ...(brandExcludeFilter(excludeBrands?.cpu) ?? []),
-            ...(minSpecs?.cpuCores ? [{ cpuSpec: { cores: { gte: minSpecs.cpuCores } } }] : []),
-          ],
-        },
-        include: FULL_INCLUDE,
-        orderBy: { priceCents: "asc" },
-      }),
-      prisma.product.findMany({
-        where: {
-          componentType: "MOTHERBOARD",
-          stock: { gt: 0 },
-          ...brandContainsFilter(preferBrands?.motherboard),
-          AND: brandExcludeFilter(excludeBrands?.motherboard) ?? [],
-        },
-        include: FULL_INCLUDE,
-        orderBy: { priceCents: "asc" },
-      }),
-      prisma.product.findMany({
-        where: {
-          componentType: "MEMORY",
-          stock: { gt: 0 },
-          ...brandContainsFilter(preferBrands?.ram),
-          AND: [
-            ...(brandExcludeFilter(excludeBrands?.ram) ?? []),
-            ...(minSpecs?.memoryGb ? [{ memorySpec: { capacityGb: { gte: minSpecs.memoryGb } } }] : []),
-          ],
-        },
-        include: FULL_INCLUDE,
-        orderBy: { priceCents: "asc" },
-      }),
-      prisma.product.findMany({
-        where: {
-          componentType: "STORAGE",
-          stock: { gt: 0 },
-          ...brandContainsFilter(preferBrands?.storage),
-          AND: [
-            ...(brandExcludeFilter(excludeBrands?.storage) ?? []),
-            ...(minSpecs?.storageGb ? [{ storageSpec: { capacityGb: { gte: minSpecs.storageGb } } }] : []),
-          ],
-        },
-        include: FULL_INCLUDE,
-        orderBy: { priceCents: "asc" },
-      }),
+      withRetry(
+        () => prisma.product.findMany({
+          where: {
+            componentType: "CPU",
+            stock: { gt: 0 },
+            ...brandContainsFilter(preferBrands?.cpu),
+            AND: [
+              ...(brandExcludeFilter(excludeBrands?.cpu) ?? []),
+              ...(minSpecs?.cpuCores ? [{ cpuSpec: { cores: { gte: minSpecs.cpuCores } } }] : []),
+            ],
+          },
+          include: FULL_INCLUDE,
+          orderBy: { priceCents: "asc" },
+        }),
+        getDefaultRetryConfig()
+      ),
+      withRetry(
+        () => prisma.product.findMany({
+          where: {
+            componentType: "MOTHERBOARD",
+            stock: { gt: 0 },
+            ...brandContainsFilter(preferBrands?.motherboard),
+            AND: brandExcludeFilter(excludeBrands?.motherboard) ?? [],
+          },
+          include: FULL_INCLUDE,
+          orderBy: { priceCents: "asc" },
+        }),
+        getDefaultRetryConfig()
+      ),
+      withRetry(
+        () => prisma.product.findMany({
+          where: {
+            componentType: "MEMORY",
+            stock: { gt: 0 },
+            ...brandContainsFilter(preferBrands?.ram),
+            AND: [
+              ...(brandExcludeFilter(excludeBrands?.ram) ?? []),
+              ...(minSpecs?.memoryGb ? [{ memorySpec: { capacityGb: { gte: minSpecs.memoryGb } } }] : []),
+            ],
+          },
+          include: FULL_INCLUDE,
+          orderBy: { priceCents: "asc" },
+        }),
+        getDefaultRetryConfig()
+      ),
+      withRetry(
+        () => prisma.product.findMany({
+          where: {
+            componentType: "STORAGE",
+            stock: { gt: 0 },
+            ...brandContainsFilter(preferBrands?.storage),
+            AND: [
+              ...(brandExcludeFilter(excludeBrands?.storage) ?? []),
+              ...(minSpecs?.storageGb ? [{ storageSpec: { capacityGb: { gte: minSpecs.storageGb } } }] : []),
+            ],
+          },
+          include: FULL_INCLUDE,
+          orderBy: { priceCents: "asc" },
+        }),
+        getDefaultRetryConfig()
+      ),
       needsGpu
-        ? prisma.product.findMany({
-            where: {
-              componentType: "GPU",
-              stock: { gt: 0 },
-              ...brandContainsFilter(preferBrands?.gpu),
-              AND: [
-                ...(brandExcludeFilter(excludeBrands?.gpu) ?? []),
-                ...(minSpecs?.gpuVramGb ? [{ gpuSpec: { vramGb: { gte: minSpecs.gpuVramGb } } }] : []),
-              ],
-            },
-            include: FULL_INCLUDE,
-            orderBy: { priceCents: "asc" },
-          })
+        ? withRetry(
+            () => prisma.product.findMany({
+              where: {
+                componentType: "GPU",
+                stock: { gt: 0 },
+                ...brandContainsFilter(preferBrands?.gpu),
+                AND: [
+                  ...(brandExcludeFilter(excludeBrands?.gpu) ?? []),
+                  ...(minSpecs?.gpuVramGb ? [{ gpuSpec: { vramGb: { gte: minSpecs.gpuVramGb } } }] : []),
+                ],
+              },
+              include: FULL_INCLUDE,
+              orderBy: { priceCents: "asc" },
+            }),
+            getDefaultRetryConfig()
+          )
         : Promise.resolve([]),
-      prisma.product.findMany({
-        where: {
-          componentType: "PSU",
-          stock: { gt: 0 },
-          ...brandContainsFilter(preferBrands?.psu),
-          AND: brandExcludeFilter(excludeBrands?.psu) ?? [],
-        },
-        include: FULL_INCLUDE,
-        orderBy: { priceCents: "asc" },
-      }),
-      prisma.product.findMany({
-        where: {
-          componentType: "CASE",
-          stock: { gt: 0 },
-          ...brandContainsFilter(preferBrands?.case),
-          AND: brandExcludeFilter(excludeBrands?.case) ?? [],
-        },
-        include: FULL_INCLUDE,
-        orderBy: { priceCents: "asc" },
-      }),
+      withRetry(
+        () => prisma.product.findMany({
+          where: {
+            componentType: "PSU",
+            stock: { gt: 0 },
+            ...brandContainsFilter(preferBrands?.psu),
+            AND: brandExcludeFilter(excludeBrands?.psu) ?? [],
+          },
+          include: FULL_INCLUDE,
+          orderBy: { priceCents: "asc" },
+        }),
+        getDefaultRetryConfig()
+      ),
+      withRetry(
+        () => prisma.product.findMany({
+          where: {
+            componentType: "CASE",
+            stock: { gt: 0 },
+            ...brandContainsFilter(preferBrands?.case),
+            AND: brandExcludeFilter(excludeBrands?.case) ?? [],
+          },
+          include: FULL_INCLUDE,
+          orderBy: { priceCents: "asc" },
+        }),
+        getDefaultRetryConfig()
+      ),
     ]);
 
-  const cpus         = dbProductsToTypes(cpusRaw)         as CpuProduct[];
-  const motherboards = dbProductsToTypes(motherboardsRaw) as MotherboardProduct[];
-  const memories     = dbProductsToTypes(memoriesRaw)     as MemoryProduct[];
-  const storages     = dbProductsToTypes(storagesRaw)     as StorageProduct[];
-  const gpus         = dbProductsToTypes(gpusRaw)         as GpuProduct[];
-  const psus         = dbProductsToTypes(psusRaw)         as PsuProduct[];
-  const cases        = dbProductsToTypes(casesRaw)        as CaseProduct[];
+  const cpus = filterLockedProducts(
+    dbProductsToTypes(cpusRaw) as CpuProduct[],
+    lockedComponents.cpu,
+  );
+  const motherboards = filterLockedProducts(
+    dbProductsToTypes(motherboardsRaw) as MotherboardProduct[],
+    lockedComponents.motherboard,
+  );
+  const memories = filterLockedProducts(
+    dbProductsToTypes(memoriesRaw) as MemoryProduct[],
+    lockedComponents.memory,
+  );
+  const storages = filterLockedProducts(
+    dbProductsToTypes(storagesRaw) as StorageProduct[],
+    lockedComponents.storage,
+  );
+  const gpus = filterLockedProducts(
+    dbProductsToTypes(gpusRaw) as GpuProduct[],
+    lockedComponents.gpu,
+  );
+  const psus = filterLockedProducts(
+    dbProductsToTypes(psusRaw) as PsuProduct[],
+    lockedComponents.psu,
+  );
+  const cases = filterLockedProducts(
+    dbProductsToTypes(casesRaw) as CaseProduct[],
+    lockedComponents.case,
+  );
 
   // ── Generate one build per tier (independently — no shared CPU exclusion) ──
   // Tiers pick CPUs by price-proximity to their own budget target. If two tiers

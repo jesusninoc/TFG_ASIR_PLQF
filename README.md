@@ -1,6 +1,16 @@
 # PC Selector
 
-Tienda de componentes PC con builder inteligente, asistente IA y pagos reales con Stripe.
+Tienda de componentes PC con builder inteligente, asistente IA multi-agente y pagos reales con Stripe.
+
+El asistente ("Chipi") soporta:
+- Generación de builds personalizadas (PC completas)
+- Búsqueda de componentes por tipo, marca y rango de precio
+- Respuestas técnicas sobre productos específicos
+- Consulta de estado de pedidos
+- Escalado a agente humano
+
+---
+
 
 ---
 
@@ -11,6 +21,24 @@ Tienda de componentes PC con builder inteligente, asistente IA y pagos reales co
 - **Stripe** (Payment Intents + Checkout Sessions + Webhooks via Node.js SDK)
 - **Vercel** (hosting recomendado)
 - **Tailwind CSS v4** · **TypeScript**
+
+---
+
+## Arquitectura del Asistente IA (Multi-Agent)
+
+El asistente utiliza una arquitectura de **múltiples agentes especializados** orquestados por un `CoordinatorAgent`:
+
+1. **Clasificador de intenciones** (Híbrido LLM + reglas): Determina si el usuario quiere generar un PC, buscar componentes, preguntar sobre un producto, consultar su pedido o ver su carrito. Puede usar un modelo ligero separado (`NIM_CLASSIFIER_MODEL`) o fallback a reglas.
+2. **Agentes especializados**:
+   - `BuildAgent`: Genera configuraciones completas usando el motor determinista (`build-engine.ts`).
+   - `CatalogAgent`: Busca componentes en el catálogo con tool-calling iterativo.
+   - `TechnicalAgent`: Responde preguntas técnicas sobre un producto específico (ej. "¿Es buena esta gráfica para 4K?").
+   - `ContextAgent`: Enriquece el contexto (información del carrito y página actual).
+   - `OrderAgent`: Consulta estado de pedidos por email.
+3. **Motor determinista** (`build-engine.ts` + `compatibility.ts`): Genera builds con garantías matemáticas de stock, compatibilidad y presupuesto.
+4. **Resiliencia**: timeouts globales, retry con backoff exponencial, circuit breaker y logging estructurado con correlation IDs.
+
+El clasificador intenta extraer `productId` cuando el usuario se refiere a "esta gráfica" mientras ve una página de producto, para que `TechnicalAgent` pueda analizar ese producto concreto.
 
 ---
 
@@ -39,15 +67,32 @@ npm install
 
 ### 2. Variables de entorno
 
-Este proyecto usa **dos archivos** de entorno por un motivo concreto:
+Este proyecto usa **tres archivos** de entorno según el componente:
 
 | Archivo | Quién lo lee | Para qué |
 |---|---|---|
-| `.env` | Prisma CLI, Docker Compose, Next.js | Variables de BD y Stripe |
-| `.env.local` | Solo Next.js | Sobreescritura puntual (opcional) |
+| `.env` | Prisma CLI, Docker Compose, Next.js | Variables de BD, Stripe, y configuración del asistente (Ollama, timeouts, multi-agent) |
+| `.env.local` | Solo Next.js | Sobreescritura puntual (opcional, tiene prioridad sobre `.env`) |
 
 > **¿Por qué no solo `.env.local`?**  
 > `prisma migrate`, `prisma db seed` y `docker-compose` **no leen `.env.local`** — eso es exclusivo de Next.js. Sin `.env`, los comandos de Prisma fallan con `P1012: Environment variable not found`.
+
+Variables principales:
+
+| Variable | Descripción |
+|---|---|
+| `DATABASE_URL`, `DATABASE_URL_UNPOOLED` | Conexión a Supabase/PostgreSQL |
+| `STRIPE_SECRET_KEY`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET` | Claves de Stripe |
+| `OLLAMA_HOST` | URL del servidor Ollama (default: `http://localhost:11434`) |
+| `OLLAMA_MODEL` | Modelo de Ollama para el parser de intenciones (default: `mistral`) |
+| `USE_MULTI_AGENT` | Activa arquitectura multi‑agente (`true`/`false`) |
+| `USE_LLM_CLASSIFIER` | Usa LLM para clasificación con fallback a reglas (`true`/`false`) |
+| `NIM_MODEL` | Modelo principal para agentes (si usas NVIDIA NIM) |
+| `NIM_CLASSIFIER_MODEL` | Modelo separado para clasificación |
+| `AGENT_TIMEOUT_GLOBAL` | Timeout total de petición (ms) |
+| `AGENT_TIMEOUT_LLM`, `AGENT_TIMEOUT_TOOL`, `AGENT_TIMEOUT_ITERATION` | Timeouts específicos |
+| `NIM_RETRY_MAX_ATTEMPTS`, `NIM_RETRY_BASE_DELAY`, `NIM_RETRY_MAX_DELAY` | Configuración de retry |
+| `CIRCUIT_BREAKER_ENABLED` | Activa circuit breaker para llamadas LLM |
 
 Crea tu `.env` copiando el ejemplo:
 
@@ -206,7 +251,7 @@ Supabase (PostgreSQL)
 ```
 app/
   api/
-    assistant/route.ts             ← Asistente IA (RAG desde BD)
+    assistant/route.ts             ← Asistente IA (multi-agent coordinator)
     checkout/route.ts              ← Stripe Checkout Sessions
     products/
       route.ts                    ← GET catálogo con filtros
@@ -225,20 +270,50 @@ app/
   page.tsx                        ← Home
 
 lib/
+  agent/
+    coordinator/
+      coordinator.ts              ← Orquestador principal
+      llm-classifier.ts           ← Clasificador LLM (JSON output)
+      router.ts                   ← Clasificador basado en reglas (fallback)
+    base-agent.ts                 ← BaseAgent y NimLLMAdapter (timeouts, retry, circuit breaker)
+    agent-config.ts               ← Configuración de agentes
+    timeout-manager.ts            ← Utilidades de timeout
+    circuit-breaker.ts            ← Patrón circuit breaker
+    build-agent/
+      build-agent.ts              ← Agente para generación de builds
+    catalog-agent/
+      catalog-agent.ts            ← Agente de búsqueda de componentes
+    faq-agent/
+      faq-agent.ts                ← Agente técnico (análisis de productos)
+    context-agent/
+      context-agent.ts            ← Agente de enriquecimiento de contexto
+    order-agent/
+      order-agent.ts              ← Agente de estado de pedidos
+    tools/
+      catalog-tools.ts            ← Tool definition: search_catalog
+      build-tools.ts              ← Tool definition: generate_build
+  build-engine.ts                 ← Motor determinista de builds
+  catalog.ts                      ← Datos estáticos del catálogo (solo para seed)
+  compatibility.ts                ← Validador de compatibilidad física
+  db-to-types.ts                  ← Conversor Prisma → tipos del dominio
   prisma.ts                       ← Cliente Prisma singleton
   stripe.ts                       ← Cliente Stripe + verificación de webhooks (SDK)
-  db-to-types.ts                  ← Conversor Prisma → tipos del dominio
-  catalog.ts                      ← Catálogo estático (solo para el seed)
+  stripe-appearance.ts            ← Configuración deUI de Stripe
   types.ts                        ← Tipos TypeScript compartidos
-  compatibility.ts                ← Lógica de compatibilidad de builds
-  rag.ts                          ← Asistente IA (async, lee de Supabase)
+  form-factors.ts                 ← Utilidades de factor de forma
+  builder-transfer.ts             ← Normalización de selecciones del builder
 
 components/
   pc-builder.tsx                  ← Builder client (carga productos vía API)
   ai-assistant.tsx                ← Chat flotante del asistente
   store-provider.tsx              ← Carrito en localStorage
+  add-to-cart-button.tsx
+  build-card.tsx
+  component-card.tsx
+  site-header.tsx
+  site-footer.tsx
 
 prisma/
   schema.prisma                   ← Schema con url + directUrl para Supabase
-  seed.ts                         ← Seed inicial del catálogo
+  seed.ts                         ← Seed inicial del catálogo (usa lib/catalog.ts)
 ```

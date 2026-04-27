@@ -16,7 +16,7 @@ if (!process.env.STRIPE_SECRET_KEY) {
 
 export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   // Fija la versión de la API para evitar cambios inesperados al actualizar el paquete
-  apiVersion: "2025-02-24.acacia",
+  apiVersion: "2025-08-27.basil",
   typescript: true,
 });
 

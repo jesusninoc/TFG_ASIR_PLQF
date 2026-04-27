@@ -7,6 +7,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { stripe } from "@/lib/stripe";
 import { prisma } from "@/lib/prisma";
+import { checkoutSessionKey } from "@/lib/stripe-idempotency";
 
 const bodySchema = z.object({
   items: z
@@ -62,20 +63,43 @@ export async function POST(request: Request) {
       0,
     );
 
-    // Create Stripe session FIRST, only persist the order if Stripe succeeds
-    const session = await stripe.checkout.sessions.create({
-      mode: "payment",
-      success_url: `${appUrl}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${appUrl}/checkout?cancelled=true`,
-      line_items: lineItems.map((item) => ({
+    // Generate deterministic idempotency key based on cart contents and shipping
+    const idempotencyKey = checkoutSessionKey(
+      lineItems.map((item) => ({
+        product: { id: item.product.id },
         quantity: item.quantity,
-        price_data: {
-          currency: "eur",
-          product_data: { name: item.name },
-          unit_amount: item.priceCents,
-        },
       })),
+      0 // shipping not used in current schema
+    );
+
+    // Create Stripe session FIRST, only persist the order if Stripe succeeds
+    const session = await stripe.checkout.sessions.create(
+      {
+        mode: "payment",
+        success_url: `${appUrl}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${appUrl}/checkout?cancelled=true`,
+        line_items: lineItems.map((item) => ({
+          quantity: item.quantity,
+          price_data: {
+            currency: "eur",
+            product_data: { name: item.name },
+            unit_amount: item.priceCents,
+          },
+        })),
+        metadata: { items: JSON.stringify(lineItems) },
+      },
+      { idempotencyKey } // Pass idempotency key
+    );
+
+    // Check for existing order with this session (idempotent response)
+    const existingOrder = await prisma.order.findFirst({
+      where: { stripeSessionId: session.id },
+      include: { items: true },
     });
+
+    if (existingOrder) {
+      return NextResponse.json({ url: session.url, orderId: existingOrder.id });
+    }
 
     // Persist order only after Stripe session was created successfully
     const order = await prisma.order.create({
@@ -94,9 +118,9 @@ export async function POST(request: Request) {
       },
     });
 
-    // Update session metadata with the order id
+    // Update session metadata with the order id (only on first creation)
     await stripe.checkout.sessions.update(session.id, {
-      metadata: { orderId: order.id },
+      metadata: { ...session.metadata, orderId: order.id },
     });
 
     return NextResponse.json({ url: session.url, orderId: order.id });
